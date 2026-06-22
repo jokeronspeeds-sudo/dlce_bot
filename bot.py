@@ -1,12 +1,8 @@
-import os
-import logging
-import asyncio
-import re
-import json
-import hashlib
-import httpx
+import os, logging, asyncio, re, json, hashlib, httpx
+from io import BytesIO
 from datetime import datetime, timezone
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from urllib.parse import quote_plus, urlencode
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, ConversationHandler
@@ -15,10 +11,7 @@ import google.generativeai as genai
 import anthropic
 from supabase import create_client
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN       = os.environ["BOT_TOKEN"]
@@ -35,69 +28,94 @@ claude = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 supabase = None
 try:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.info("Supabase connected OK")
+    logger.info("Supabase connected")
 except Exception as e:
-    logger.warning(f"Supabase not connected: {e}")
+    logger.warning(f"Supabase skipped: {e}")
 
 LANG, TH_LEVEL, PURPOSE = range(3)
 
+# ── Translations ──────────────────────────────────────────────
 T = {
     "en": {
-        "welcome":    "Welcome! Choose your language:",
-        "q_th":       "What is your Town Hall level?",
-        "q_purpose":  "What is the purpose of your base?",
-        "searching":  "Searching YouTube, base sites and community... ~15 seconds",
-        "recommended":"Recommended",
-        "score":      "Score: {score}/100",
-        "cc":         "CC troops: {cc}",
-        "uploaded":   "Uploaded: {date}",
-        "worked":     "It worked!",
-        "no_defend":  "Did not defend",
-        "thanks":     "Thanks! This helps improve rankings.",
-        "rank":       "RANK",
-        "war":        "WAR",
-        "farm":       "FARM",
-        "fresh":      "FRESH",
-        "old":        "OLDER",
-        "no_results": "No bases found. Try again in a minute.",
+        "welcome":     "👋 Welcome to CoC Base Finder!\n\nI'll find the best bases for your Town Hall — with screenshots, CC troops, and freshness ratings.\n\nChoose your language:",
+        "q_th":        "🏰 Select your Town Hall level:",
+        "q_purpose":   "🎯 What are you building for?",
+        "searching":   "🔍 Searching YouTube, Reddit & base sites...\nThis takes ~15 seconds, hang tight!",
+        "results_hdr": "✅ Found top bases for TH{th} {purpose}",
+        "recommended": "⭐ BEST PICK",
+        "score":       "Score {score}/100",
+        "cc":          "CC: {cc}",
+        "uploaded":    "Posted: {date}",
+        "source_btn":  "📌 View Source",
+        "open_btn":    "🏰 Copy Base",
+        "worked":      "✅ Defended!",
+        "no_defend":   "❌ Failed",
+        "thanks_good": "🎉 Great! This base's score goes up.",
+        "thanks_bad":  "📉 Noted. This base's score goes down.",
+        "rank":        "🏆 RANK",
+        "war":         "⚔️ WAR",
+        "farm":        "💰 FARM",
+        "fresh":       "🟢 Fresh",
+        "old":         "🟡 Older",
+        "stale":       "🔴 Old",
+        "no_results":  "😕 No bases found right now. Try again in a minute.",
+        "searching_yt":"📺 YouTube",
+        "searching_web":"🌐 Websites",
+        "searching_reddit":"💬 Reddit",
     },
     "ru": {
-        "welcome":    "Привет! Выбери язык:",
-        "q_th":       "Какой у тебя уровень ратуши?",
-        "q_purpose":  "Какова цель базы?",
-        "searching":  "Ищу на YouTube, сайтах и в сообществе... ~15 секунд",
-        "recommended":"Рекомендуем",
-        "score":      "Оценка: {score}/100",
-        "cc":         "Замок клана: {cc}",
-        "uploaded":   "Загружено: {date}",
-        "worked":     "Сработало!",
-        "no_defend":  "Не устояла",
-        "thanks":     "Спасибо! Это улучшает рейтинг.",
-        "rank":       "РАНГ",
-        "war":        "ВОЙНА",
-        "farm":       "ФАРМ",
-        "fresh":      "СВЕЖАЯ",
-        "old":        "СТАРШЕ",
-        "no_results": "Базы не найдены. Попробуй снова через минуту.",
+        "welcome":     "👋 Добро пожаловать в CoC Base Finder!\n\nНайду лучшие базы для твоей ратуши — со скриншотами, войсками замка клана и оценкой свежести.\n\nВыбери язык:",
+        "q_th":        "🏰 Выбери уровень ратуши:",
+        "q_purpose":   "🎯 Для чего строишь базу?",
+        "searching":   "🔍 Ищу на YouTube, Reddit и сайтах с базами...\nПодожди ~15 секунд!",
+        "results_hdr": "✅ Топ базы для РУ{th} {purpose}",
+        "recommended": "⭐ ЛУЧШИЙ ВЫБОР",
+        "score":       "Оценка {score}/100",
+        "cc":          "ЗК: {cc}",
+        "uploaded":    "Дата: {date}",
+        "source_btn":  "📌 Смотреть источник",
+        "open_btn":    "🏰 Скопировать базу",
+        "worked":      "✅ Устояла!",
+        "no_defend":   "❌ Не устояла",
+        "thanks_good": "🎉 Отлично! Рейтинг базы повышается.",
+        "thanks_bad":  "📉 Учтено. Рейтинг базы снижается.",
+        "rank":        "🏆 РАНГ",
+        "war":         "⚔️ ВОЙНА",
+        "farm":        "💰 ФАРМ",
+        "fresh":       "🟢 Свежая",
+        "old":         "🟡 Постарше",
+        "stale":       "🔴 Старая",
+        "no_results":  "😕 Базы не найдены. Попробуй через минуту.",
+        "searching_yt":"📺 YouTube",
+        "searching_web":"🌐 Сайты",
+        "searching_reddit":"💬 Reddit",
     },
     "he": {
-        "welcome":    "שלום! בחר שפה:",
-        "q_th":       "מה רמת עיירת המועצה שלך?",
-        "q_purpose":  "מה מטרת הבסיס?",
-        "searching":  "מחפש ב-YouTube, אתרי בסיסים וקהילה... ~15 שניות",
-        "recommended":"מומלץ",
-        "score":      "ציון: {score}/100",
-        "cc":         "טירת קבוצה: {cc}",
-        "uploaded":   "הועלה: {date}",
-        "worked":     "עבד!",
-        "no_defend":  "לא החזיק",
-        "thanks":     "תודה! זה עוזר לשפר את הדירוג.",
-        "rank":       "דירוג",
-        "war":        "מלחמה",
-        "farm":       "חווה",
-        "fresh":      "חדש",
-        "old":        "ישן יותר",
-        "no_results": "לא נמצאו בסיסים. נסה שוב בעוד דקה.",
+        "welcome":     "👋 ברוך הבא ל-CoC Base Finder!\n\nאמצא עבורך את הבסיסים הטובים ביותר — עם צילומי מסך, חיילי טירה וציון רעננות.\n\nבחר שפה:",
+        "q_th":        "🏰 בחר את רמת עיירת המועצה:",
+        "q_purpose":   "🎯 למה הבסיס מיועד?",
+        "searching":   "🔍 מחפש ב-YouTube, Reddit ואתרי בסיסים...\nרגע סבלנות, כ-15 שניות!",
+        "results_hdr": "✅ הבסיסים המובילים עבור TH{th} {purpose}",
+        "recommended": "⭐ הבחירה הטובה ביותר",
+        "score":       "ציון {score}/100",
+        "cc":          "טירה: {cc}",
+        "uploaded":    "תאריך: {date}",
+        "source_btn":  "📌 צפה במקור",
+        "open_btn":    "🏰 העתק בסיס",
+        "worked":      "✅ עמד!",
+        "no_defend":   "❌ נפל",
+        "thanks_good": "🎉 מעולה! ציון הבסיס עולה.",
+        "thanks_bad":  "📉 נרשם. ציון הבסיס יורד.",
+        "rank":        "🏆 דירוג",
+        "war":         "⚔️ מלחמה",
+        "farm":        "💰 חווה",
+        "fresh":       "🟢 חדש",
+        "old":         "🟡 ישן יותר",
+        "stale":       "🔴 ישן",
+        "no_results":  "😕 לא נמצאו בסיסים. נסה שוב בעוד דקה.",
+        "searching_yt":"📺 YouTube",
+        "searching_web":"🌐 אתרים",
+        "searching_reddit":"💬 Reddit",
     },
 }
 
@@ -107,125 +125,18 @@ def t(lang, key, **kwargs):
 
 
 # ══════════════════════════════════════════════════════════════
-# BUILT-IN BASE DATABASE
-# Always works — no internet needed — updated to June 2025 meta
+# BUILT-IN BASE DATABASE (always works as safety net)
 # ══════════════════════════════════════════════════════════════
-
 BUILTIN_BASES = {
-    10: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Witch + Ice Golem", "date": "2025-03", "stars": 4.8, "downloads": 32000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AWB%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Witch + Balloon", "date": "2025-02", "stars": 4.6, "downloads": 21000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Balloon + Minion", "date": "2025-04", "stars": 4.7, "downloads": 18000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Dragon + Witch", "date": "2025-03", "stars": 4.5, "downloads": 15000},
-        ],
-    },
-    11: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem", "date": "2025-04", "stars": 4.9, "downloads": 41000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AWB%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Witch + Balloon + Ice Golem", "date": "2025-03", "stars": 4.7, "downloads": 28000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Balloon + Super Witch", "date": "2025-05", "stars": 4.8, "downloads": 22000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AHV%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Dragon + Witch", "date": "2025-02", "stars": 4.5, "downloads": 17000},
-        ],
-    },
-    12: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Witch", "date": "2025-05", "stars": 4.9, "downloads": 55000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Witch", "date": "2025-04", "stars": 4.7, "downloads": 38000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Balloon + Super Witch", "date": "2025-05", "stars": 4.8, "downloads": 29000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Dragon + Witch", "date": "2025-03", "stars": 4.5, "downloads": 19000},
-        ],
-    },
-    13: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 62000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch", "date": "2025-05", "stars": 4.8, "downloads": 44000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Balloon + Super Witch", "date": "2025-05", "stars": 4.8, "downloads": 33000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Dragon + Witch + Balloon", "date": "2025-04", "stars": 4.6, "downloads": 24000},
-        ],
-    },
-    14: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 71000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch + Ice Golem", "date": "2025-05", "stars": 4.8, "downloads": 52000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Balloon + Super Witch + Skeleton", "date": "2025-06", "stars": 4.8, "downloads": 41000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Dragon + Super Witch + Balloon", "date": "2025-04", "stars": 4.6, "downloads": 29000},
-        ],
-    },
-    15: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 88000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch + Head Hunter", "date": "2025-05", "stars": 4.8, "downloads": 64000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Balloon + Super Witch + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 53000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Dragon + Super Witch + Balloon", "date": "2025-05", "stars": 4.7, "downloads": 37000},
-        ],
-    },
-    16: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 79000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch + Head Hunter", "date": "2025-05", "stars": 4.8, "downloads": 57000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Balloon + Super Witch + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 48000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Inferno Dragon + Super Witch", "date": "2025-05", "stars": 4.7, "downloads": 33000},
-        ],
-    },
-    17: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 92000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch + Head Hunter", "date": "2025-05", "stars": 4.8, "downloads": 71000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AWB%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Super Witch + Head Hunter + Balloon", "date": "2025-04", "stars": 4.7, "downloads": 48000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Balloon + Super Witch + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 61000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AHV%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch", "date": "2025-05", "stars": 4.7, "downloads": 42000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Inferno Dragon + Super Witch + Balloon", "date": "2025-05", "stars": 4.7, "downloads": 38000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Dragon + Super Witch", "date": "2025-04", "stars": 4.5, "downloads": 27000},
-        ],
-    },
-    18: {
-        "WAR":  [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Witch + Ice Golem + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 68000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch + Head Hunter", "date": "2025-06", "stars": 4.8, "downloads": 51000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AWB%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Super Witch + Head Hunter + Ice Golem", "date": "2025-05", "stars": 4.7, "downloads": 39000},
-        ],
-        "RANK": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Super Balloon + Super Witch + Head Hunter", "date": "2025-06", "stars": 4.9, "downloads": 44000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AHV%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV", "cc": "Inferno Dragon + Super Witch", "date": "2025-05", "stars": 4.7, "downloads": 33000},
-        ],
-        "FARM": [
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi", "cc": "Inferno Dragon + Super Witch + Balloon", "date": "2025-06", "stars": 4.8, "downloads": 42000},
-            {"link": "https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s", "cc": "Dragon + Super Witch + Head Hunter", "date": "2025-05", "stars": 4.6, "downloads": 29000},
-        ],
-    },
+    10: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV","cc":"Witch + Ice Golem","date":"2025-03","stars":4.8,"downloads":32000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Balloon + Minion","date":"2025-04","stars":4.7,"downloads":18000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH10%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Dragon + Witch","date":"2025-03","stars":4.5,"downloads":15000}]},
+    11: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem","date":"2025-04","stars":4.9,"downloads":41000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Balloon + Super Witch","date":"2025-05","stars":4.8,"downloads":22000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH11%3AHV%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV","cc":"Dragon + Witch","date":"2025-02","stars":4.5,"downloads":17000}]},
+    12: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Witch","date":"2025-05","stars":4.9,"downloads":55000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Balloon + Super Witch","date":"2025-05","stars":4.8,"downloads":29000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH12%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Dragon + Witch","date":"2025-03","stars":4.5,"downloads":19000}]},
+    13: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Head Hunter","date":"2025-06","stars":4.9,"downloads":62000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Balloon + Super Witch","date":"2025-05","stars":4.8,"downloads":33000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH13%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Dragon + Witch + Balloon","date":"2025-04","stars":4.6,"downloads":24000}]},
+    14: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Head Hunter","date":"2025-06","stars":4.9,"downloads":71000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Balloon + Super Witch","date":"2025-06","stars":4.8,"downloads":41000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH14%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Dragon + Super Witch","date":"2025-04","stars":4.6,"downloads":29000}]},
+    15: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Head Hunter","date":"2025-06","stars":4.9,"downloads":88000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Balloon + Super Witch + Head Hunter","date":"2025-06","stars":4.9,"downloads":53000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH15%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Dragon + Super Witch + Balloon","date":"2025-05","stars":4.7,"downloads":37000}]},
+    16: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Head Hunter","date":"2025-06","stars":4.9,"downloads":79000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Balloon + Super Witch + Head Hunter","date":"2025-06","stars":4.9,"downloads":48000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH16%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Inferno Dragon + Super Witch","date":"2025-05","stars":4.7,"downloads":33000}]},
+    17: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Head Hunter","date":"2025-06","stars":4.9,"downloads":92000},{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV","cc":"Inferno Dragon + Super Witch + Head Hunter","date":"2025-05","stars":4.8,"downloads":71000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Balloon + Super Witch + Head Hunter","date":"2025-06","stars":4.9,"downloads":61000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH17%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Inferno Dragon + Super Witch + Balloon","date":"2025-05","stars":4.7,"downloads":38000}]},
+    18: {"WAR": [{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AWB%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Witch + Ice Golem + Head Hunter","date":"2025-06","stars":4.9,"downloads":68000},{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AWB%3AAAAAGQAAAAIrqQ4h6wq_WqV8B8XZRGKV","cc":"Inferno Dragon + Super Witch + Head Hunter","date":"2025-06","stars":4.8,"downloads":51000}],"RANK":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AHV%3AAAAAGQAAAAIs9CFgf7_aqsLumPPDHJ5s","cc":"Super Balloon + Super Witch + Head Hunter","date":"2025-06","stars":4.9,"downloads":44000}],"FARM":[{"link":"https://link.clashofclans.com/en?action=OpenLayout&id=TH18%3AHV%3AAAAAGQAAAAIrMzmMAfRXDk0FNdKGxhPi","cc":"Inferno Dragon + Super Witch + Balloon","date":"2025-06","stars":4.8,"downloads":42000}]},
 }
 
 
@@ -234,42 +145,37 @@ BUILTIN_BASES = {
 # ══════════════════════════════════════════════════════════════
 
 def extract_cc(text):
-    troops = [
-        "inferno dragon", "super witch", "ice golem", "head hunter",
-        "witch", "balloon", "super balloon", "minion", "dragon",
-        "valkyrie", "golem", "hog rider", "bowler", "electro dragon",
-        "lava hound", "super archer", "skeleton"
-    ]
+    troops = ["inferno dragon","super witch","ice golem","head hunter","witch",
+              "balloon","super balloon","minion","dragon","valkyrie","golem",
+              "hog rider","bowler","electro dragon","lava hound","super archer","skeleton"]
     low = text.lower()
     found = [tr for tr in troops if tr in low]
     if found:
         return " + ".join(found[:3]).title()
     m = re.search(r'cc[:\s]+([^\n.]{5,60})', low)
-    if m:
-        return m.group(1).strip().title()
-    return "Check source for CC"
-
+    return m.group(1).strip().title() if m else "Check source"
 
 def recency_score(date_str):
-    """Convert date string like '2025-06' to a recency bonus 0-20."""
     try:
-        if not date_str:
-            return 0
         parts = date_str.split("-")
         year, month = int(parts[0]), int(parts[1]) if len(parts) > 1 else 1
         now = datetime.now(timezone.utc)
         months_old = (now.year - year) * 12 + (now.month - month)
-        if months_old <= 1:   return 20   # This month or last = max bonus
-        if months_old <= 3:   return 15   # Up to 3 months old
-        if months_old <= 6:   return 10   # Up to 6 months old
-        if months_old <= 12:  return 5    # Up to 1 year old
-        return 0                           # Older = no bonus
+        if months_old <= 1:  return 20
+        if months_old <= 3:  return 15
+        if months_old <= 6:  return 10
+        if months_old <= 12: return 5
+        return 0
     except Exception:
         return 0
 
+def freshness_label(date_str, lang):
+    rec = recency_score(date_str)
+    if rec >= 15: return t(lang, "fresh")
+    if rec >= 5:  return t(lang, "old")
+    return t(lang, "stale")
 
 def format_date(date_str, lang):
-    """Format date string nicely."""
     try:
         months = {
             "en": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
@@ -278,28 +184,86 @@ def format_date(date_str, lang):
         }
         parts = date_str.split("-")
         year, month = int(parts[0]), int(parts[1]) if len(parts) > 1 else 1
-        m_names = months.get(lang, months["en"])
-        return f"{m_names[month-1]} {year}"
+        return f"{months.get(lang, months['en'])[month-1]} {year}"
     except Exception:
-        return date_str
-
+        return date_str or "Unknown"
 
 def get_builtin_bases(th, purpose):
-    """Get built-in bases for given TH and purpose, with recency scores."""
     bases = BUILTIN_BASES.get(th, {}).get(purpose, [])
     result = []
     for b in bases:
         base = dict(b)
-        base["source"] = f"CoC community (built-in)"
-        rec = recency_score(base.get("date", ""))
-        base["recency_bonus"] = rec
-        base["score"] = min(100, int(
-            base.get("downloads", 0) / 1000 * 0.35 +
-            base.get("stars", 4.0) * 10 * 0.30 +
-            rec * 0.35
-        ))
+        base["source_name"] = "CoC Community"
+        base["source_url"]  = f"https://cocbases.com/th{th}-{'war' if purpose=='WAR' else 'trophy' if purpose=='RANK' else 'farming'}-base/"
+        base["image_url"]   = None
+        rec = recency_score(base.get("date",""))
+        base["score"] = min(100, int(base.get("downloads",0)/1000*0.4 + base.get("stars",4)*10*0.25 + rec*1.75))
         result.append(base)
     return result
+
+
+# ══════════════════════════════════════════════════════════════
+# IMAGE FETCHER — gets real thumbnails from each source
+# ══════════════════════════════════════════════════════════════
+
+async def fetch_image(url: str) -> BytesIO | None:
+    """Download an image from a URL and return as BytesIO."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        async with httpx.AsyncClient(timeout=15, headers=headers, follow_redirects=True) as c:
+            r = await c.get(url)
+        if r.status_code == 200 and "image" in r.headers.get("content-type", ""):
+            buf = BytesIO(r.content)
+            buf.name = "base.jpg"
+            buf.seek(0)
+            return buf
+    except Exception as e:
+        logger.warning(f"Image fetch failed ({url[:60]}): {e}")
+    return None
+
+async def get_youtube_thumbnail(video_id: str) -> BytesIO | None:
+    """Get YouTube video thumbnail — tries maxresdefault then hqdefault."""
+    for quality in ["maxresdefault", "hqdefault", "mqdefault"]:
+        img = await fetch_image(f"https://img.youtube.com/vi/{video_id}/{quality}.jpg")
+        if img:
+            logger.info(f"YouTube thumbnail OK ({quality})")
+            return img
+    return None
+
+async def get_website_thumbnail(page_url: str) -> BytesIO | None:
+    """Scrape the first base/layout image from a web page."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        async with httpx.AsyncClient(timeout=15, headers=headers, follow_redirects=True) as c:
+            r = await c.get(page_url)
+        html = r.text
+
+        # Find og:image first (most sites set this to the base thumbnail)
+        og = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](https?://[^"\']+)["\']', html)
+        if og:
+            img = await fetch_image(og.group(1))
+            if img:
+                logger.info(f"og:image thumbnail OK")
+                return img
+
+        # Find first meaningful image in page
+        imgs = re.findall(r'<img[^>]+src=["\'](https?://[^"\']+(?:base|layout|th\d+)[^"\']*\.(?:jpg|jpeg|png|webp))["\']', html, re.IGNORECASE)
+        for img_url in imgs[:5]:
+            img = await fetch_image(img_url)
+            if img:
+                logger.info(f"Page image OK: {img_url[:60]}")
+                return img
+
+        # Reddit: look for preview images
+        reddit_imgs = re.findall(r'"url": ?"(https://preview\.redd\.it/[^"]+)"', html)
+        if reddit_imgs:
+            img = await fetch_image(reddit_imgs[0].replace("&amp;", "&"))
+            if img:
+                return img
+
+    except Exception as e:
+        logger.warning(f"Website thumbnail error: {e}")
+    return None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -307,25 +271,23 @@ def get_builtin_bases(th, purpose):
 # ══════════════════════════════════════════════════════════════
 
 async def search_youtube(th, purpose):
-    """Search YouTube — extract links and publish dates."""
+    """YouTube search — extract links, dates, and thumbnails."""
     results = []
     try:
         query = f"TH{th} {purpose} base 2025 Clash of Clans"
         search_url = (
             f"https://www.googleapis.com/youtube/v3/search"
-            f"?part=snippet&q={query}&type=video&maxResults=10"
+            f"?part=snippet&q={quote_plus(query)}&type=video&maxResults=10"
             f"&order=date&key={YOUTUBE_API_KEY}"
         )
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.get(search_url)
-            data = r.json()
+            data = (await c.get(search_url)).json()
 
         if "error" in data:
-            logger.warning(f"YouTube API error: {data['error'].get('message','?')}")
+            logger.warning(f"YouTube error: {data['error'].get('message')}")
             return results
 
         items = data.get("items", [])
-        logger.info(f"YouTube returned {len(items)} videos")
         if not items:
             return results
 
@@ -335,84 +297,156 @@ async def search_youtube(th, purpose):
             f"?part=snippet&id={vid_ids}&key={YOUTUBE_API_KEY}"
         )
         async with httpx.AsyncClient(timeout=15) as c:
-            dr = await c.get(detail_url)
-            ddata = dr.json()
+            ddata = (await c.get(detail_url)).json()
 
         for item in ddata.get("items", []):
-            title       = item["snippet"]["title"]
-            desc        = item["snippet"]["description"]
-            published   = item["snippet"].get("publishedAt", "")[:7]  # "2025-06"
+            vid_id    = item["id"]
+            title     = item["snippet"]["title"]
+            desc      = item["snippet"]["description"]
+            published = item["snippet"].get("publishedAt","")[:7]
+            channel   = item["snippet"].get("channelTitle","YouTube")
 
             links = re.findall(r'https://link\.clashofclans\.com[^\s"\'<>)]+', desc)
-            for raw_link in links:
-                clean = raw_link.rstrip(".,)&")
+            for raw in links:
+                clean = raw.rstrip(".,)&")
                 link_up = clean.upper()
-                wrong_th = any(
-                    f"TH{other}%3A" in link_up
-                    for other in range(1, 18) if other != th
-                )
-                if wrong_th:
+                if any(f"TH{o}%3A" in link_up for o in range(1,18) if o != th):
                     continue
                 rec = recency_score(published)
                 results.append({
-                    "link":          clean,
-                    "cc":            extract_cc(desc),
-                    "source":        f"YouTube: {title[:50]}",
-                    "date":          published,
-                    "recency_bonus": rec,
-                    "downloads":     0,
-                    "stars":         0,
-                    "score":         50 + rec,
+                    "link":        clean,
+                    "cc":          extract_cc(desc),
+                    "source_name": f"YouTube · {channel}",
+                    "source_url":  f"https://youtube.com/watch?v={vid_id}",
+                    "image_type":  "youtube",
+                    "image_id":    vid_id,
+                    "image_url":   None,
+                    "date":        published,
+                    "score":       50 + rec,
+                    "downloads":   0,
+                    "stars":       0,
                 })
-                logger.info(f"YouTube found ({published}): {clean[:60]}")
+                logger.info(f"YouTube found: {published} {clean[:55]}")
                 break
 
     except Exception as e:
         logger.warning(f"YouTube error: {e}")
 
-    logger.info(f"YouTube total: {len(results)}")
+    logger.info(f"YouTube: {len(results)} bases")
     return results
 
 
 async def search_web(th, purpose):
-    """Scrape base sites for fresh links."""
+    """Scrape cocbases.com for links + page thumbnails."""
     results = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    slug_map = {"RANK": ["trophy","trophies"], "WAR": ["war","anti-3-star"], "FARM": ["farming","farm"]}
 
-    # Try multiple URL patterns for cocbases.com
-    slug_map = {"RANK": ["trophy", "trophies"], "WAR": ["war", "anti-3-star"], "FARM": ["farming", "farm"]}
-    slugs = slug_map.get(purpose, ["war"])
-
-    for slug in slugs:
+    for slug in slug_map.get(purpose, ["war"]):
         try:
             url = f"https://cocbases.com/th{th}-{slug}-base/"
             async with httpx.AsyncClient(timeout=20, headers=headers, follow_redirects=True) as c:
                 r = await c.get(url)
-            if r.status_code == 200:
-                html = r.text
-                links = list(dict.fromkeys(
-                    re.findall(r'https://link\.clashofclans\.com[^\s"\'<>)]+', html)
-                ))
-                logger.info(f"cocbases.com/{slug}: {len(links)} links")
-                dates = re.findall(r'20\d\d-\d\d-\d\d', html)
-                latest_date = dates[0][:7] if dates else "2025-03"
-                for lnk in links[:4]:
-                    rec = recency_score(latest_date)
-                    results.append({
-                        "link":          lnk.rstrip(".,)&"),
-                        "cc":            extract_cc(html),
-                        "source":        "cocbases.com",
-                        "date":          latest_date,
-                        "recency_bonus": rec,
-                        "downloads":     15000,
-                        "stars":         4.7,
-                        "score":         min(100, 70 + rec),
-                    })
-                break
+            if r.status_code != 200:
+                continue
+            html = r.text
+            links = list(dict.fromkeys(re.findall(r'https://link\.clashofclans\.com[^\s"\'<>)]+', html)))
+            dates = re.findall(r'20\d\d-\d\d-\d\d', html)
+            latest_date = dates[0][:7] if dates else "2025-03"
+
+            # Find base thumbnail images on the page
+            img_urls = re.findall(
+                r'<img[^>]+src=["\'](https?://[^"\']+\.(?:jpg|jpeg|png|webp))["\']',
+                html, re.IGNORECASE
+            )
+            base_img = next(
+                (u for u in img_urls if any(k in u.lower() for k in ["th"+str(th), "base", "layout"])),
+                None
+            )
+
+            logger.info(f"cocbases/{slug}: {len(links)} links, img={'yes' if base_img else 'no'}")
+            for lnk in links[:4]:
+                rec = recency_score(latest_date)
+                results.append({
+                    "link":        lnk.rstrip(".,)&"),
+                    "cc":          extract_cc(html),
+                    "source_name": "cocbases.com",
+                    "source_url":  url,
+                    "image_type":  "web",
+                    "image_url":   base_img,
+                    "date":        latest_date,
+                    "score":       min(100, 70 + rec),
+                    "downloads":   15000,
+                    "stars":       4.7,
+                })
+            break
         except Exception as e:
             logger.warning(f"cocbases error ({slug}): {e}")
 
-    logger.info(f"Web search total: {len(results)}")
+    logger.info(f"Web: {len(results)} bases")
+    return results
+
+
+async def search_reddit(th, purpose):
+    """Search Reddit r/ClashOfClans for base posts with images."""
+    results = []
+    try:
+        purpose_kw = {"WAR": "war base anti 3 star", "RANK": "trophy base", "FARM": "farming base"}
+        query = f"TH{th} {purpose_kw.get(purpose,'base')} site:reddit.com/r/ClashOfClans"
+        url = f"https://www.reddit.com/r/ClashOfClans/search.json?q=TH{th}+{purpose_kw.get(purpose,'base')}&sort=new&limit=10&restrict_sr=1"
+        headers = {"User-Agent": "CoC-Base-Finder-Bot/1.0"}
+        async with httpx.AsyncClient(timeout=15, headers=headers) as c:
+            r = await c.get(url)
+        data = r.json()
+
+        posts = data.get("data", {}).get("children", [])
+        logger.info(f"Reddit returned {len(posts)} posts")
+
+        for post in posts:
+            p = post.get("data", {})
+            title    = p.get("title", "")
+            selftext = p.get("selftext", "")
+            post_url = f"https://reddit.com{p.get('permalink','')}"
+            created  = datetime.fromtimestamp(p.get("created_utc", 0), tz=timezone.utc)
+            date_str = created.strftime("%Y-%m")
+
+            # Get image from post
+            image_url = None
+            preview = p.get("preview", {}).get("images", [])
+            if preview:
+                src = preview[0].get("source", {}).get("url","")
+                image_url = src.replace("&amp;", "&")
+            if not image_url and p.get("url","").endswith((".jpg",".png",".jpeg")):
+                image_url = p["url"]
+
+            # Find CoC link in text
+            all_text = title + " " + selftext
+            links = re.findall(r'https://link\.clashofclans\.com[^\s"\'<>)]+', all_text)
+            if not links:
+                continue
+
+            clean = links[0].rstrip(".,)&")
+            rec = recency_score(date_str)
+            upvotes = p.get("score", 0)
+
+            results.append({
+                "link":        clean,
+                "cc":          extract_cc(all_text),
+                "source_name": f"Reddit · r/ClashOfClans",
+                "source_url":  post_url,
+                "image_type":  "reddit",
+                "image_url":   image_url,
+                "date":        date_str,
+                "score":       min(100, 40 + rec + min(upvotes // 10, 20)),
+                "downloads":   upvotes * 10,
+                "stars":       min(5.0, 3.5 + upvotes / 1000),
+            })
+            logger.info(f"Reddit found: {date_str} upvotes={upvotes} {clean[:50]}")
+
+    except Exception as e:
+        logger.warning(f"Reddit error: {e}")
+
+    logger.info(f"Reddit: {len(results)} bases")
     return results
 
 
@@ -421,57 +455,44 @@ def validate_link(link):
 
 
 async def rank_bases(bases, th, purpose, lang):
-    """
-    Score and rank bases. Uses Claude if credits available,
-    otherwise uses built-in scoring formula.
-    """
-    if not bases:
-        return []
-
-    # Always compute local score first as fallback
+    """Score and rank — recency first, then community signals."""
     for b in bases:
-        rec = recency_score(b.get("date", ""))
-        dl  = min(b.get("downloads", 0), 100000)
+        rec = recency_score(b.get("date",""))
+        dl  = min(b.get("downloads",0), 100000)
         st  = min(b.get("stars", 4.0), 5.0)
         b["recency_bonus"] = rec
-        b["score"] = int(dl / 100000 * 35 + st / 5 * 30 + rec * 0.35 * 35 / 20 * 35 / 35 + rec)
-        b["score"] = min(100, b["score"])
+        b["score"] = min(100, int(dl/100000*35 + st/5*30 + rec*1.75))
         if not b.get("reason"):
-            age_label = t(lang, "fresh") if rec >= 15 else t(lang, "old")
-            b["reason"] = f"{age_label} — {format_date(b.get('date',''), lang)}"
+            b["reason"] = f"{freshness_label(b.get('date',''), lang)} — {format_date(b.get('date',''), lang)}"
 
-    # Sort by score descending
-    bases.sort(key=lambda x: x.get("score", 0), reverse=True)
+    bases.sort(key=lambda x: x.get("score",0), reverse=True)
 
-    # Try Claude for smarter ranking + reasons
     try:
-        simplified = [{
-            "link":     b["link"],
-            "cc":       b.get("cc",""),
-            "source":   b.get("source",""),
-            "date":     b.get("date",""),
-            "downloads":b.get("downloads",0),
-            "stars":    b.get("stars",0),
-        } for b in bases[:6]]
-
+        simplified = [{"link":b["link"],"cc":b.get("cc",""),"source":b.get("source_name",""),
+                       "date":b.get("date",""),"downloads":b.get("downloads",0),"stars":b.get("stars",0)}
+                      for b in bases[:6]]
         msg = claude.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=800,
-            messages=[{"role": "user", "content": (
-                f"Rank these Clash of Clans TH{th} {purpose} bases. "
-                f"Prioritize: 1) Most recent date 2) Most downloads 3) Highest stars.\n\n"
-                f"Bases:\n{json.dumps(simplified, indent=2)}\n\n"
+            model="claude-sonnet-4-6", max_tokens=800,
+            messages=[{"role":"user","content":(
+                f"Rank these TH{th} {purpose} Clash of Clans bases. "
+                f"Prioritise: 1) newest date 2) downloads 3) stars.\n\n"
+                f"{json.dumps(simplified,indent=2)}\n\n"
                 f"Return ONLY JSON array, best first, max 3:\n"
                 f'[{{"link":"...","cc":"...","source":"...","date":"...","score":88,'
-                f'"reason":"One sentence — mention upload date and why it ranks high"}}]'
+                f'"reason":"One line mentioning date and why it ranks"}}]'
             )}]
         )
-        raw = re.sub(r"```json|```", "", msg.content[0].text).strip()
+        raw = re.sub(r"```json|```","", msg.content[0].text).strip()
         m = re.search(r'\[.*?\]', raw, re.DOTALL)
         if m:
             ranked = json.loads(m.group())
-            logger.info(f"Claude ranked {len(ranked)} bases")
-            return ranked[:3]
+            # Merge back image/source_url fields from original bases
+            link_map = {b["link"]: b for b in bases}
+            merged = []
+            for rb in ranked[:3]:
+                orig = link_map.get(rb.get("link",""), {})
+                merged.append({**orig, **rb})
+            return merged
     except Exception as e:
         logger.warning(f"Claude ranking skipped: {e}")
 
@@ -483,19 +504,13 @@ async def save_base(base, th, purpose):
         return
     try:
         supabase.table("bases").upsert({
-            "link":        base["link"],
-            "th_level":    th,
-            "purpose":     purpose,
-            "score":       base.get("score", 70),
-            "cc":          base.get("cc", ""),
-            "source":      base.get("source", ""),
-            "date":        base.get("date", ""),
-            "thumbs_up":   0,
-            "thumbs_down": 0,
+            "link": base["link"], "th_level": th, "purpose": purpose,
+            "score": base.get("score",70), "cc": base.get("cc",""),
+            "source": base.get("source_name",""), "date": base.get("date",""),
+            "thumbs_up": 0, "thumbs_down": 0,
         }, on_conflict="link").execute()
     except Exception as e:
-        logger.warning(f"Supabase save error: {e}")
-
+        logger.warning(f"Supabase: {e}")
 
 async def update_feedback(link, positive):
     if not supabase:
@@ -504,11 +519,9 @@ async def update_feedback(link, positive):
         col = "thumbs_up" if positive else "thumbs_down"
         row = supabase.table("bases").select(col).eq("link", link).execute()
         if row.data:
-            supabase.table("bases").update(
-                {col: row.data[0][col] + 1}
-            ).eq("link", link).execute()
+            supabase.table("bases").update({col: row.data[0][col]+1}).eq("link", link).execute()
     except Exception as e:
-        logger.warning(f"Feedback error: {e}")
+        logger.warning(f"Feedback: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -522,139 +535,167 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InlineKeyboardButton("🇮🇱 עברית",   callback_data="lang_he"),
     ]]
     await update.message.reply_text(
-        "🏰 CoC Base Finder\n\nChoose language / Выбери язык / בחר שפה",
+        T["en"]["welcome"],
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return LANG
 
-
 async def language_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    lang = query.data.replace("lang_", "")
+    lang = query.data.replace("lang_","")
     context.user_data["lang"] = lang
-
-    row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10, 14)]
-    row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14, 18)]
+    row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10,14)]
+    row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14,18)]
     row3 = [InlineKeyboardButton("TH18",   callback_data="th_18")]
-
-    await query.edit_message_text(
-        t(lang, "q_th"),
-        reply_markup=InlineKeyboardMarkup([row1, row2, row3])
-    )
+    await query.edit_message_text(t(lang,"q_th"), reply_markup=InlineKeyboardMarkup([row1,row2,row3]))
     return TH_LEVEL
-
 
 async def th_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    th   = int(query.data.replace("th_", ""))
+    th   = int(query.data.replace("th_",""))
     lang = context.user_data["lang"]
     context.user_data["th"] = th
-
     keyboard = [[
-        InlineKeyboardButton(t(lang, "rank"),  callback_data="purpose_RANK"),
-        InlineKeyboardButton(t(lang, "war"),   callback_data="purpose_WAR"),
-        InlineKeyboardButton(t(lang, "farm"),  callback_data="purpose_FARM"),
+        InlineKeyboardButton(t(lang,"rank"),  callback_data="purpose_RANK"),
+        InlineKeyboardButton(t(lang,"war"),   callback_data="purpose_WAR"),
+        InlineKeyboardButton(t(lang,"farm"),  callback_data="purpose_FARM"),
     ]]
     await query.edit_message_text(
-        f"TH{th} ✓\n\n{t(lang, 'q_purpose')}",
+        f"TH{th} ✓\n\n{t(lang,'q_purpose')}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return PURPOSE
 
-
 async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query   = update.callback_query
     await query.answer()
-    purpose = query.data.replace("purpose_", "")
+    purpose = query.data.replace("purpose_","")
     lang    = context.user_data["lang"]
     th      = context.user_data["th"]
     chat_id = query.message.chat_id
 
-    await query.edit_message_text(f"TH{th} · {purpose}\n\n⏳ {t(lang, 'searching')}")
+    await query.edit_message_text(
+        f"TH{th} · {purpose}\n\n{t(lang,'searching')}"
+    )
 
-    # Run live searches + load built-in bases in parallel
-    yt_task  = asyncio.create_task(search_youtube(th, purpose))
-    web_task = asyncio.create_task(search_web(th, purpose))
-    builtin  = get_builtin_bases(th, purpose)
+    # Run all 3 searches in parallel
+    yt_res, web_res, reddit_res = await asyncio.gather(
+        search_youtube(th, purpose),
+        search_web(th, purpose),
+        search_reddit(th, purpose),
+    )
 
-    yt_results  = await yt_task
-    web_results = await web_task
-
-    # Merge all sources — live results first (fresher), builtin as safety net
-    all_bases = yt_results + web_results
+    all_bases = yt_res + web_res + reddit_res
     valid = [b for b in all_bases if validate_link(b["link"])]
 
-    # Always have at least built-in bases
+    # Fill gaps with built-in database
     if len(valid) < 3:
-        logger.info(f"Adding {len(builtin)} built-in bases as fallback")
-        existing_links = {b["link"] for b in valid}
+        builtin = get_builtin_bases(th, purpose)
+        existing = {b["link"] for b in valid}
         for b in builtin:
-            if b["link"] not in existing_links:
+            if b["link"] not in existing:
                 valid.append(b)
 
-    logger.info(f"Total candidates: {len(valid)}")
-
     if not valid:
-        await context.bot.send_message(chat_id=chat_id, text=t(lang, "no_results"))
+        await context.bot.send_message(chat_id=chat_id, text=t(lang,"no_results"))
         return ConversationHandler.END
 
-    # Rank with recency priority
     top3 = await rank_bases(valid, th, purpose, lang)
 
-    # Save to DB
     for base in top3:
         await save_base(base, th, purpose)
 
-    # Send results
-    medals = ["🥇", "🥈", "🥉"]
+    # ── Send header message ───────────────────────────────────
+    purpose_label = t(lang, purpose.lower()) if purpose.lower() in T[lang] else purpose
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=t(lang, "results_hdr", th=th, purpose=purpose_label)
+    )
+
+    # ── Send each base card ───────────────────────────────────
+    medals    = ["🥇","🥈","🥉"]
     context.user_data["links"] = {}
 
     for i, base in enumerate(top3):
-        score  = base.get("score", 70)
-        cc     = base.get("cc", "Not specified")
-        source = base.get("source", "")
-        reason = base.get("reason", "")
-        date   = base.get("date", "")
-        link   = base["link"]
-
-        header = f"{medals[i]} #{i+1}"
-        if i == 0:
-            header += f"  ⭐ {t(lang, 'recommended')}"
-
-        # Recency badge
-        rec = recency_score(date)
-        if rec >= 15:
-            freshness = f"🟢 {t(lang, 'fresh')}"
-        elif rec >= 5:
-            freshness = f"🟡 {t(lang, 'old')}"
-        else:
-            freshness = "🔴 2024 or older"
-
-        text = (
-            f"{header}\n"
-            f"{t(lang, 'score', score=score)}\n"
-            f"📅 {t(lang, 'uploaded', date=format_date(date, lang))}  {freshness}\n"
-            f"{t(lang, 'cc', cc=cc)}\n"
-            f"📌 {source}\n"
-        )
-        if reason:
-            text += f"💬 {reason}\n"
-        text += f"\n🔗 {link}"
+        score      = base.get("score", 70)
+        cc         = base.get("cc", "Check source")
+        source_name= base.get("source_name", "Community")
+        source_url = base.get("source_url", "")
+        reason     = base.get("reason", "")
+        date       = base.get("date", "")
+        link       = base["link"]
+        image_type = base.get("image_type","")
+        image_url  = base.get("image_url")
+        image_id   = base.get("image_id","")
 
         link_key = hashlib.md5(link.encode()).hexdigest()[:16]
         context.user_data["links"][link_key] = link
 
-        keyboard = [[
-            InlineKeyboardButton(t(lang, "worked"),    callback_data=f"fb_pos_{link_key}"),
-            InlineKeyboardButton(t(lang, "no_defend"), callback_data=f"fb_neg_{link_key}"),
-        ]]
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+        fresh = freshness_label(date, lang)
+        date_fmt = format_date(date, lang)
+
+        # ── Build caption ─────────────────────────────────────
+        if i == 0:
+            rank_line = f"{t(lang,'recommended')}  {medals[i]}"
+        else:
+            rank_line = f"{medals[i]}  Base #{i+1}"
+
+        bar = "━" * 26
+        caption = (
+            f"{rank_line}\n"
+            f"{bar}\n"
+            f"🏆 {t(lang,'score',score=score)}\n"
+            f"📅 {t(lang,'uploaded',date=date_fmt)}  {fresh}\n"
+            f"🏰 {t(lang,'cc',cc=cc)}\n"
+            f"📌 {source_name}\n"
         )
+        if reason:
+            caption += f"💬 {reason}\n"
+        caption += bar
+
+        # ── Buttons ───────────────────────────────────────────
+        keyboard = [
+            [
+                InlineKeyboardButton(t(lang,"open_btn"),   url=link),
+                InlineKeyboardButton(t(lang,"source_btn"), url=source_url) if source_url else None,
+            ],
+            [
+                InlineKeyboardButton(t(lang,"worked"),    callback_data=f"fb_pos_{link_key}"),
+                InlineKeyboardButton(t(lang,"no_defend"), callback_data=f"fb_neg_{link_key}"),
+            ],
+        ]
+        # Remove None buttons
+        keyboard = [[b for b in row if b] for row in keyboard]
+
+        # ── Fetch image from real source ──────────────────────
+        image = None
+        try:
+            if image_type == "youtube" and image_id:
+                image = await get_youtube_thumbnail(image_id)
+            elif image_url:
+                image = await fetch_image(image_url)
+            elif source_url:
+                image = await get_website_thumbnail(source_url)
+        except Exception as e:
+            logger.warning(f"Image fetch error: {e}")
+
+        markup = InlineKeyboardMarkup(keyboard)
+
+        if image:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=image,
+                caption=caption,
+                reply_markup=markup
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                reply_markup=markup
+            )
 
     return ConversationHandler.END
 
@@ -662,20 +703,17 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    lang     = context.user_data.get("lang", "en")
+    lang     = context.user_data.get("lang","en")
     positive = query.data.startswith("fb_pos_")
     link_key = query.data[7:]
-    link     = context.user_data.get("links", {}).get(link_key, link_key)
+    link     = context.user_data.get("links",{}).get(link_key, link_key)
     await update_feedback(link, positive)
     await query.edit_message_reply_markup(reply_markup=None)
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text=t(lang, "thanks")
-    )
-
+    reply = t(lang, "thanks_good") if positive else t(lang, "thanks_bad")
+    await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Cancelled. Send /start to begin again.")
+    await update.message.reply_text("Cancelled. Send /start to try again.")
     return ConversationHandler.END
 
 
@@ -698,7 +736,6 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
     logger.info("Bot is starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
