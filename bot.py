@@ -38,7 +38,7 @@ SUPABASE_KEY   = os.environ["SUPABASE_KEY"]
 
 # ── Set up AI clients ────────────────────────────────────────
 genai.configure(api_key=GEMINI_API_KEY)
-gemini = genai.GenerativeModel("gemini-1.5-flash")
+gemini = genai.GenerativeModel("gemini-2.0-flash")
 claude = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
 # ── Supabase (optional — bot works without it) ───────────────
@@ -194,7 +194,7 @@ async def search_web(th: int, purpose: str) -> list[dict]:
     results = []
     try:
         # Correct tool name for Gemini grounding
-        model_grounded = genai.GenerativeModel("gemini-1.5-flash")
+        model_grounded = genai.GenerativeModel("gemini-2.0-flash")
         resp = model_grounded.generate_content(
             prompt,
             tools=[{"google_search": {}}]
@@ -386,8 +386,8 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     purpose = query.data.replace("purpose_", "")
     lang    = context.user_data["lang"]
     th      = context.user_data["th"]
+    chat_id = query.message.chat_id
 
-    # Show "searching" message immediately so user knows it's working
     await query.edit_message_text(
         f"TH{th} · {purpose}\n\n⏳ {t(lang, 'searching')}"
     )
@@ -397,31 +397,76 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         search_youtube(th, purpose),
         search_web(th, purpose)
     )
+
+    # ── Debug: tell user what we found ──────────────────────
+    debug_msg = (
+        f"🔍 Search complete:\n"
+        f"• YouTube bases found: {len(yt_results)}\n"
+        f"• Web bases found: {len(web_results)}\n"
+        f"• Total: {len(yt_results) + len(web_results)}"
+    )
+    await context.bot.send_message(chat_id=chat_id, text=debug_msg)
+
     all_bases = yt_results + web_results
 
-    # ── Validate links (remove dead ones) ───────────────────
+    if not all_bases:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "❌ Both searches returned 0 results.\n\n"
+                "Possible reasons:\n"
+                "• YouTube API key not activated yet (takes ~5 min after enabling)\n"
+                "• Gemini API quota reached\n"
+                "• Check Railway logs for details\n\n"
+                "Try /start again in 2 minutes."
+            )
+        )
+        return ConversationHandler.END
+
+    # ── Validate links ────────────────────────────────────────
     valid_bases = []
     for base in all_bases:
         if await validate_link(base["link"]):
             valid_bases.append(base)
         if len(valid_bases) >= 8:
-            break  # Enough candidates for ranking
+            break
 
-    # ── Rank with Claude ─────────────────────────────────────
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ Valid links after check: {len(valid_bases)}"
+    )
+
+    if not valid_bases:
+        # Show raw links anyway so user gets something useful
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Found bases but links failed validation. Showing raw results:"
+        )
+        for base in all_bases[:3]:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"🔗 {base.get('link','no link')}\n📌 {base.get('source','')}\n🏰 CC: {base.get('cc','?')}"
+            )
+        return ConversationHandler.END
+
+    # ── Rank with Claude ──────────────────────────────────────
     top3 = await rank_bases(valid_bases, th, purpose)
 
     if not top3:
         await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="Sorry, couldn't find valid bases right now. Try again in a minute!"
+            chat_id=chat_id,
+            text="❌ Ranking failed. Showing unranked results:"
         )
-        return ConversationHandler.END
+        top3 = valid_bases[:3]
+        for i, b in enumerate(top3):
+            b["score"] = 70 - i*5
+            b["reason"] = "Community recommended"
 
-    # ── Save to Supabase ─────────────────────────────────────
+    # ── Save to Supabase ──────────────────────────────────────
     for base in top3:
         await save_base(base, th, purpose)
 
-    # ── Send each base as a separate message ─────────────────
+    # ── Send results ──────────────────────────────────────────
     medals = ["🥇", "🥈", "🥉"]
     for i, base in enumerate(top3):
         is_recommended = (i == 0)
@@ -431,7 +476,6 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reason = base.get("reason", "")
         link   = base["link"]
 
-        # Build the message text
         header = f"{medals[i]} #{i+1}"
         if is_recommended:
             header += f"  ⭐ {t(lang, 'recommended')}"
@@ -446,7 +490,6 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             text += f"💬 {reason}\n"
         text += f"\n🔗 {link}"
 
-        # Feedback buttons
         keyboard = [[
             InlineKeyboardButton(
                 t(lang, "worked"),
@@ -459,12 +502,13 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]]
 
         await context.bot.send_message(
-            chat_id=query.message.chat_id,
+            chat_id=chat_id,
             text=text,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     return ConversationHandler.END
+
 
 
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
