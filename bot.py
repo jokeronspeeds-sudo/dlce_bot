@@ -40,7 +40,14 @@ SUPABASE_KEY   = os.environ["SUPABASE_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
 gemini = genai.GenerativeModel("gemini-1.5-flash")
 claude = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ── Supabase (optional — bot works without it) ───────────────
+supabase = None
+try:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("Supabase connected OK")
+except Exception as e:
+    logger.warning(f"Supabase not connected: {e} — bot will run without database")
 
 # ── Conversation states ──────────────────────────────────────
 LANG, TH_LEVEL, PURPOSE = range(3)
@@ -241,6 +248,8 @@ async def rank_bases(bases: list[dict], th: int, purpose: str) -> list[dict]:
 
 async def save_base(base: dict, th: int, purpose: str):
     """Save a base to Supabase for caching and feedback tracking."""
+    if not supabase:
+        return
     try:
         supabase.table("bases").upsert({
             "link":      base["link"],
@@ -258,9 +267,10 @@ async def save_base(base: dict, th: int, purpose: str):
 
 async def update_feedback(link: str, positive: bool):
     """Increment thumbs up or down for a base."""
+    if not supabase:
+        return
     try:
         col = "thumbs_up" if positive else "thumbs_down"
-        # Read current value then increment
         row = supabase.table("bases").select(col).eq("link", link).execute()
         if row.data:
             current = row.data[0][col]
