@@ -37,7 +37,7 @@ LANG, TH_LEVEL, PURPOSE = range(3)
 # ── Translations ──────────────────────────────────────────────
 T = {
     "en": {
-        "welcome":     "👋 Welcome to CoC Base Finder!\n\nI'll find the best bases for your Town Hall — with screenshots, CC troops, and freshness ratings.\n\nChoose your language:",
+        "welcome":     "🎲 dlce BASE bot\n\nI'll find the best bases for your Town Hall — CC troops, real stats & freshness ratings.\n\nChoose your language:",
         "q_th":        "🏰 Select your Town Hall level:",
         "q_purpose":   "🎯 What are you building for?",
         "searching":   "🔍 Searching YouTube, Reddit & base sites...\nThis takes ~15 seconds, hang tight!",
@@ -64,7 +64,7 @@ T = {
         "searching_reddit":"💬 Reddit",
     },
     "ru": {
-        "welcome":     "👋 Добро пожаловать в CoC Base Finder!\n\nНайду лучшие базы для твоей ратуши — со скриншотами, войсками замка клана и оценкой свежести.\n\nВыбери язык:",
+        "welcome":     "🎲 dlce BASE bot\n\nНайду лучшие базы для твоей ратуши — с войсками замка и оценкой свежести.\n\nВыбери язык:",
         "q_th":        "🏰 Выбери уровень ратуши:",
         "q_purpose":   "🎯 Для чего строишь базу?",
         "searching":   "🔍 Ищу на YouTube, Reddit и сайтах с базами...\nПодожди ~15 секунд!",
@@ -91,7 +91,7 @@ T = {
         "searching_reddit":"💬 Reddit",
     },
     "he": {
-        "welcome":     "👋 ברוך הבא ל-CoC Base Finder!\n\nאמצא עבורך את הבסיסים הטובים ביותר — עם צילומי מסך, חיילי טירה וציון רעננות.\n\nבחר שפה:",
+        "welcome":     "🎲 dlce BASE bot\n\nאמצא עבורך את הבסיסים הטובים ביותר — חיילי טירה וציון רעננות.\n\nבחר שפה:",
         "q_th":        "🏰 בחר את רמת עיירת המועצה:",
         "q_purpose":   "🎯 למה הבסיס מיועד?",
         "searching":   "🔍 מחפש ב-YouTube, Reddit ואתרי בסיסים...\nרגע סבלנות, כ-15 שניות!",
@@ -270,14 +270,45 @@ async def get_website_thumbnail(page_url: str) -> BytesIO | None:
 # SEARCH ENGINE
 # ══════════════════════════════════════════════════════════════
 
+# Keywords that indicate a BASE video (good) vs ATTACK video (bad)
+BASE_KEYWORDS   = ["base", "layout", "design", "copy", "link", "download", "anti", "defense", "defence", "best base", "new base"]
+ATTACK_KEYWORDS = ["attack", "3 star", "three star", "how to beat", "vs ", "beating", "raid", "destroy", "strategy guide", "how i"]
+
+def is_base_video(title: str, desc: str) -> bool:
+    """Return True only if the video is clearly about a base layout, not an attack."""
+    low_title = title.lower()
+    low_desc  = desc.lower()[:300]
+
+    # Reject if title clearly mentions attack tactics
+    attack_hits = sum(1 for kw in ATTACK_KEYWORDS if kw in low_title)
+    base_hits   = sum(1 for kw in BASE_KEYWORDS   if kw in low_title)
+
+    if attack_hits > 0 and base_hits == 0:
+        logger.info(f"Skipping attack video: {title[:60]}")
+        return False
+
+    # Must have a CoC base link in description — pure attack vids never do
+    if "link.clashofclans.com" not in low_desc and "link.clashofclans.com" not in desc.lower():
+        logger.info(f"No CoC link in desc, skipping: {title[:60]}")
+        return False
+
+    return True
+
+
 async def search_youtube(th, purpose):
-    """YouTube search — extract links, dates, and thumbnails."""
+    """
+    YouTube search — base videos ONLY, with real view counts and
+    like counts for scoring instead of fake stars.
+    """
     results = []
     try:
-        query = f"TH{th} {purpose} base 2025 Clash of Clans"
+        # Query specifically targets base layouts, not attacks
+        purpose_kw = {"WAR": "war base layout", "RANK": "trophy base layout", "FARM": "farming base layout"}
+        query = f"TH{th} {purpose_kw.get(purpose, 'base layout')} 2025 Clash of Clans copy link"
+
         search_url = (
             f"https://www.googleapis.com/youtube/v3/search"
-            f"?part=snippet&q={quote_plus(query)}&type=video&maxResults=10"
+            f"?part=snippet&q={quote_plus(query)}&type=video&maxResults=15"
             f"&order=date&key={YOUTUBE_API_KEY}"
         )
         async with httpx.AsyncClient(timeout=15) as c:
@@ -292,9 +323,11 @@ async def search_youtube(th, purpose):
             return results
 
         vid_ids = ",".join(i["id"]["videoId"] for i in items if i["id"].get("videoId"))
+
+        # Fetch snippet + statistics (views, likes) in one call
         detail_url = (
             f"https://www.googleapis.com/youtube/v3/videos"
-            f"?part=snippet&id={vid_ids}&key={YOUTUBE_API_KEY}"
+            f"?part=snippet,statistics&id={vid_ids}&key={YOUTUBE_API_KEY}"
         )
         async with httpx.AsyncClient(timeout=15) as c:
             ddata = (await c.get(detail_url)).json()
@@ -305,6 +338,14 @@ async def search_youtube(th, purpose):
             desc      = item["snippet"]["description"]
             published = item["snippet"].get("publishedAt","")[:7]
             channel   = item["snippet"].get("channelTitle","YouTube")
+            stats     = item.get("statistics", {})
+
+            views = int(stats.get("viewCount", 0))
+            likes = int(stats.get("likeCount", 0))
+
+            # Skip attack videos — only base layout videos
+            if not is_base_video(title, desc):
+                continue
 
             links = re.findall(r'https://link\.clashofclans\.com[^\s"\'<>)]+', desc)
             for raw in links:
@@ -312,7 +353,17 @@ async def search_youtube(th, purpose):
                 link_up = clean.upper()
                 if any(f"TH{o}%3A" in link_up for o in range(1,18) if o != th):
                     continue
+
                 rec = recency_score(published)
+                # Real score from actual YouTube stats
+                view_score = min(30, int(views / 10000))    # up to 30 pts for 300k+ views
+                like_score = min(20, int(likes / 500))      # up to 20 pts for 10k+ likes
+                score = min(100, 30 + rec + view_score + like_score)
+
+                # Human-readable stats label
+                views_fmt = f"{views//1000}K" if views >= 1000 else str(views)
+                likes_fmt = f"{likes//1000}K" if likes >= 1000 else str(likes)
+
                 results.append({
                     "link":        clean,
                     "cc":          extract_cc(desc),
@@ -322,11 +373,15 @@ async def search_youtube(th, purpose):
                     "image_id":    vid_id,
                     "image_url":   None,
                     "date":        published,
-                    "score":       50 + rec,
-                    "downloads":   0,
-                    "stars":       0,
+                    "score":       score,
+                    "views":       views,
+                    "likes":       likes,
+                    "views_fmt":   views_fmt,
+                    "likes_fmt":   likes_fmt,
+                    "downloads":   views // 10,
+                    "stars":       min(5.0, 3.5 + likes / max(views, 1) * 50),
                 })
-                logger.info(f"YouTube found: {published} {clean[:55]}")
+                logger.info(f"YouTube base video: {published} views={views_fmt} likes={likes_fmt} {title[:45]}")
                 break
 
     except Exception as e:
@@ -607,95 +662,94 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for base in top3:
         await save_base(base, th, purpose)
 
-    # ── Send header message ───────────────────────────────────
-    purpose_label = t(lang, purpose.lower()) if purpose.lower() in T[lang] else purpose
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=t(lang, "results_hdr", th=th, purpose=purpose_label)
-    )
-
-    # ── Send each base card ───────────────────────────────────
-    medals    = ["🥇","🥈","🥉"]
+    # ── Send all 3 bases in one clean message ────────────────
+    medals = ["🥇","🥈","🥉"]
     context.user_data["links"] = {}
+    purpose_label = t(lang, purpose.lower()) if purpose.lower() in T[lang] else purpose
+
+    # Build the combined message — one text block, clean table style
+    lines = [t(lang, "results_hdr", th=th, purpose=purpose_label), ""]
+
+    keyboard_rows = []
 
     for i, base in enumerate(top3):
-        score      = base.get("score", 70)
-        cc         = base.get("cc", "Check source")
-        source_name= base.get("source_name", "Community")
-        source_url = base.get("source_url", "")
-        reason     = base.get("reason", "")
-        date       = base.get("date", "")
-        link       = base["link"]
-        image_type = base.get("image_type","")
-        image_url  = base.get("image_url")
-        image_id   = base.get("image_id","")
+        score       = base.get("score", 70)
+        cc          = base.get("cc", "Check source")
+        source_name = base.get("source_name", "Community")
+        source_url  = base.get("source_url", "")
+        date        = base.get("date", "")
+        link        = base["link"]
+        image_type  = base.get("image_type","")
+        image_url   = base.get("image_url")
+        image_id    = base.get("image_id","")
 
         link_key = hashlib.md5(link.encode()).hexdigest()[:16]
         context.user_data["links"][link_key] = link
 
-        fresh = freshness_label(date, lang)
+        fresh    = freshness_label(date, lang)
         date_fmt = format_date(date, lang)
 
-        # ── Build caption ─────────────────────────────────────
         if i == 0:
-            rank_line = f"{t(lang,'recommended')}  {medals[i]}"
+            rank_line = f"{medals[i]} {t(lang,'recommended')}"
         else:
-            rank_line = f"{medals[i]}  Base #{i+1}"
+            rank_line = f"{medals[i]} Base #{i+1}"
 
-        bar = "━" * 26
-        caption = (
-            f"{rank_line}\n"
-            f"{bar}\n"
-            f"🏆 {t(lang,'score',score=score)}\n"
-            f"📅 {t(lang,'uploaded',date=date_fmt)}  {fresh}\n"
-            f"🏰 {t(lang,'cc',cc=cc)}\n"
-            f"📌 {source_name}\n"
-        )
-        if reason:
-            caption += f"💬 {reason}\n"
-        caption += bar
+        # Compact info table for this base
+        lines.append(f"{'━'*28}")
+        lines.append(rank_line)
+        lines.append(f"🏆 {t(lang,'score',score=score)}  |  📅 {date_fmt}  {fresh}")
 
-        # ── Buttons ───────────────────────────────────────────
-        keyboard = [
-            [
-                InlineKeyboardButton(t(lang,"open_btn"),   url=link),
-                InlineKeyboardButton(t(lang,"source_btn"), url=source_url) if source_url else None,
-            ],
-            [
-                InlineKeyboardButton(t(lang,"worked"),    callback_data=f"fb_pos_{link_key}"),
-                InlineKeyboardButton(t(lang,"no_defend"), callback_data=f"fb_neg_{link_key}"),
-            ],
-        ]
-        # Remove None buttons
-        keyboard = [[b for b in row if b] for row in keyboard]
+        # Show real stats if available (YouTube views/likes) or download count
+        views_fmt = base.get("views_fmt")
+        likes_fmt = base.get("likes_fmt")
+        dl        = base.get("downloads", 0)
+        if views_fmt and likes_fmt:
+            lines.append(f"👁 {views_fmt} views  ·  👍 {likes_fmt} likes")
+        elif dl and dl > 100:
+            dl_fmt = f"{dl//1000}K" if dl >= 1000 else str(dl)
+            lines.append(f"⬇️ {dl_fmt} downloads")
 
-        # ── Fetch image from real source ──────────────────────
-        image = None
+        lines.append(f"🏰 {t(lang,'cc',cc=cc)}")
+        lines.append(f"📌 {source_name}")
+
+        # Inline thumbnail — small, no full photo send
+        thumb_url = None
         try:
             if image_type == "youtube" and image_id:
-                image = await get_youtube_thumbnail(image_id)
+                thumb_url = f"https://img.youtube.com/vi/{image_id}/mqdefault.jpg"
             elif image_url:
-                image = await fetch_image(image_url)
-            elif source_url:
-                image = await get_website_thumbnail(source_url)
-        except Exception as e:
-            logger.warning(f"Image fetch error: {e}")
+                thumb_url = image_url
+        except Exception:
+            pass
 
-        markup = InlineKeyboardMarkup(keyboard)
+        if thumb_url:
+            lines.append(f"🖼 <a href=\"{thumb_url}\">preview</a>")
 
-        if image:
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=image,
-                caption=caption,
-                reply_markup=markup
-            )
-        else:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=caption,
-                reply_markup=markup
-            )
+        lines.append("")
+
+        # One row of buttons per base
+        row = [InlineKeyboardButton(
+            f"{medals[i]} {t(lang,'open_btn')}",
+            url=link
+        )]
+        if source_url:
+            row.append(InlineKeyboardButton(t(lang,"source_btn"), url=source_url))
+        keyboard_rows.append(row)
+        keyboard_rows.append([
+            InlineKeyboardButton(f"✅ #{i+1} {t(lang,'worked')}",    callback_data=f"fb_pos_{link_key}"),
+            InlineKeyboardButton(f"❌ #{i+1} {t(lang,'no_defend')}", callback_data=f"fb_neg_{link_key}"),
+        ])
+
+    lines.append(f"{'━'*28}")
+    full_text = "\n".join(lines)
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=full_text,
+        reply_markup=InlineKeyboardMarkup(keyboard_rows),
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
 
     return ConversationHandler.END
 
