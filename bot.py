@@ -62,6 +62,15 @@ T = {
         "searching_yt":"📺 YouTube",
         "searching_web":"🌐 Websites",
         "searching_reddit":"💬 Reddit",
+        "report_btn":  "⚠️ Report Issue",
+        "report_q":    "What's wrong with this base?",
+        "rep_wrong_th": "❌ Wrong TH level",
+        "rep_attack":   "⚔️ It's an attack video",
+        "rep_dead_link":"🔗 Link doesn't work",
+        "rep_old_base": "📅 Base is too old",
+        "rep_bad_cc":   "🏰 Wrong CC troops",
+        "rep_other":    "🤷 Other issue",
+        "report_thanks":"✅ Thanks! Bot will learn from this.",
     },
     "ru": {
         "welcome":     "🎲 dlce BASE bot\n\nНайду лучшие базы для твоей ратуши — с войсками замка и оценкой свежести.\n\nВыбери язык:",
@@ -89,6 +98,15 @@ T = {
         "searching_yt":"📺 YouTube",
         "searching_web":"🌐 Сайты",
         "searching_reddit":"💬 Reddit",
+        "report_btn":  "⚠️ Сообщить о проблеме",
+        "report_q":    "Что не так с этой базой?",
+        "rep_wrong_th": "❌ Не тот уровень РУ",
+        "rep_attack":   "⚔️ Это видео об атаке",
+        "rep_dead_link":"🔗 Ссылка не работает",
+        "rep_old_base": "📅 База устарела",
+        "rep_bad_cc":   "🏰 Неверные войска ЗК",
+        "rep_other":    "🤷 Другое",
+        "report_thanks":"✅ Спасибо! Бот учтёт это.",
     },
     "he": {
         "welcome":     "🎲 dlce BASE bot\n\nאמצא עבורך את הבסיסים הטובים ביותר — חיילי טירה וציון רעננות.\n\nבחר שפה:",
@@ -116,6 +134,15 @@ T = {
         "searching_yt":"📺 YouTube",
         "searching_web":"🌐 אתרים",
         "searching_reddit":"💬 Reddit",
+        "report_btn":  "⚠️ דווח על בעיה",
+        "report_q":    "מה הבעיה עם הבסיס הזה?",
+        "rep_wrong_th": "❌ רמת TH שגויה",
+        "rep_attack":   "⚔️ זה סרטון התקפה",
+        "rep_dead_link":"🔗 הקישור לא עובד",
+        "rep_old_base": "📅 הבסיס ישן מדי",
+        "rep_bad_cc":   "🏰 חיילי טירה שגויים",
+        "rep_other":    "🤷 בעיה אחרת",
+        "report_thanks":"✅ תודה! הבוט ילמד מזה.",
     },
 }
 
@@ -662,15 +689,16 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for base in top3:
         await save_base(base, th, purpose)
 
-    # ── Send all 3 bases in one clean message ────────────────
+    # ── Send each base as its own photo card ─────────────────
     medals = ["🥇","🥈","🥉"]
-    context.user_data["links"] = {}
+    context.user_data["links"]  = {}
+    context.user_data["bases"]  = {}   # store full base data for reporting
     purpose_label = t(lang, purpose.lower()) if purpose.lower() in T[lang] else purpose
 
-    # Build the combined message — one text block, clean table style
-    lines = [t(lang, "results_hdr", th=th, purpose=purpose_label), ""]
-
-    keyboard_rows = []
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=t(lang, "results_hdr", th=th, purpose=purpose_label)
+    )
 
     for i, base in enumerate(top3):
         score       = base.get("score", 70)
@@ -682,9 +710,16 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_type  = base.get("image_type","")
         image_url   = base.get("image_url")
         image_id    = base.get("image_id","")
+        views_fmt   = base.get("views_fmt")
+        likes_fmt   = base.get("likes_fmt")
+        dl          = base.get("downloads", 0)
 
         link_key = hashlib.md5(link.encode()).hexdigest()[:16]
         context.user_data["links"][link_key] = link
+        context.user_data["bases"][link_key] = {
+            "link": link, "source_name": source_name,
+            "source_url": source_url, "th": th, "purpose": purpose
+        }
 
         fresh    = freshness_label(date, lang)
         date_fmt = format_date(date, lang)
@@ -694,62 +729,68 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             rank_line = f"{medals[i]} Base #{i+1}"
 
-        # Compact info table for this base
-        lines.append(f"{'━'*28}")
-        lines.append(rank_line)
-        lines.append(f"🏆 {t(lang,'score',score=score)}  |  📅 {date_fmt}  {fresh}")
+        bar = "━" * 26
 
-        # Show real stats if available (YouTube views/likes) or download count
-        views_fmt = base.get("views_fmt")
-        likes_fmt = base.get("likes_fmt")
-        dl        = base.get("downloads", 0)
+        # Stats line
         if views_fmt and likes_fmt:
-            lines.append(f"👁 {views_fmt} views  ·  👍 {likes_fmt} likes")
+            stats_line = f"👁 {views_fmt} views  ·  👍 {likes_fmt} likes"
         elif dl and dl > 100:
             dl_fmt = f"{dl//1000}K" if dl >= 1000 else str(dl)
-            lines.append(f"⬇️ {dl_fmt} downloads")
+            stats_line = f"⬇️ {dl_fmt} downloads"
+        else:
+            stats_line = ""
 
-        lines.append(f"🏰 {t(lang,'cc',cc=cc)}")
-        lines.append(f"📌 {source_name}")
+        caption = (
+            f"{rank_line}\n"
+            f"{bar}\n"
+            f"🏆 {t(lang,'score',score=score)}\n"
+            f"📅 {t(lang,'uploaded',date=date_fmt)}  {fresh}\n"
+        )
+        if stats_line:
+            caption += f"{stats_line}\n"
+        caption += (
+            f"🏰 {t(lang,'cc',cc=cc)}\n"
+            f"📌 {source_name}\n"
+            f"{bar}"
+        )
 
-        # Inline thumbnail — small, no full photo send
-        thumb_url = None
+        # Buttons: copy base + source + feedback + report
+        btn_copy   = InlineKeyboardButton(t(lang,"open_btn"),    url=link)
+        btn_source = InlineKeyboardButton(t(lang,"source_btn"),  url=source_url) if source_url else None
+        btn_yes    = InlineKeyboardButton(t(lang,"worked"),      callback_data=f"fb_pos_{link_key}")
+        btn_no     = InlineKeyboardButton(t(lang,"no_defend"),   callback_data=f"fb_neg_{link_key}")
+        btn_report = InlineKeyboardButton(t(lang,"report_btn"),  callback_data=f"fb_rep_{link_key}")
+
+        row1 = [btn_copy, btn_source] if btn_source else [btn_copy]
+        row2 = [btn_yes, btn_no]
+        row3 = [btn_report]
+        markup = InlineKeyboardMarkup([row1, row2, row3])
+
+        # Fetch thumbnail — small preview
+        image = None
         try:
             if image_type == "youtube" and image_id:
-                thumb_url = f"https://img.youtube.com/vi/{image_id}/mqdefault.jpg"
+                image = await get_youtube_thumbnail(image_id)
             elif image_url:
-                thumb_url = image_url
-        except Exception:
-            pass
+                image = await fetch_image(image_url)
+            elif source_url and "reddit" not in source_url:
+                image = await get_website_thumbnail(source_url)
+        except Exception as e:
+            logger.warning(f"Thumb error: {e}")
 
-        if thumb_url:
-            lines.append(f"🖼 <a href=\"{thumb_url}\">preview</a>")
-
-        lines.append("")
-
-        # One row of buttons per base
-        row = [InlineKeyboardButton(
-            f"{medals[i]} {t(lang,'open_btn')}",
-            url=link
-        )]
-        if source_url:
-            row.append(InlineKeyboardButton(t(lang,"source_btn"), url=source_url))
-        keyboard_rows.append(row)
-        keyboard_rows.append([
-            InlineKeyboardButton(f"✅ #{i+1} {t(lang,'worked')}",    callback_data=f"fb_pos_{link_key}"),
-            InlineKeyboardButton(f"❌ #{i+1} {t(lang,'no_defend')}", callback_data=f"fb_neg_{link_key}"),
-        ])
-
-    lines.append(f"{'━'*28}")
-    full_text = "\n".join(lines)
-
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=full_text,
-        reply_markup=InlineKeyboardMarkup(keyboard_rows),
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
+        if image:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=image,
+                caption=caption,
+                reply_markup=markup
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                reply_markup=markup
+            )
 
     return ConversationHandler.END
 
@@ -758,13 +799,77 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     lang     = context.user_data.get("lang","en")
-    positive = query.data.startswith("fb_pos_")
-    link_key = query.data[7:]
-    link     = context.user_data.get("links",{}).get(link_key, link_key)
-    await update_feedback(link, positive)
-    await query.edit_message_reply_markup(reply_markup=None)
-    reply = t(lang, "thanks_good") if positive else t(lang, "thanks_bad")
-    await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
+    data     = query.data
+    chat_id  = query.message.chat_id
+
+    # ── Positive / negative result feedback ──────────────────
+    if data.startswith("fb_pos_") or data.startswith("fb_neg_"):
+        positive = data.startswith("fb_pos_")
+        link_key = data[7:]
+        link     = context.user_data.get("links",{}).get(link_key, link_key)
+        await update_feedback(link, positive)
+        await query.edit_message_reply_markup(reply_markup=None)
+        reply = t(lang, "thanks_good") if positive else t(lang, "thanks_bad")
+        await context.bot.send_message(chat_id=chat_id, text=reply)
+        return
+
+    # ── Report button — show reason picker ───────────────────
+    if data.startswith("fb_rep_"):
+        link_key = data[7:]
+        context.user_data["reporting_key"] = link_key
+        base     = context.user_data.get("bases",{}).get(link_key,{})
+        source   = base.get("source_name","?")
+
+        keyboard = [[
+            InlineKeyboardButton(t(lang,"rep_wrong_th"),  callback_data=f"rp_wrong_th_{link_key}"),
+            InlineKeyboardButton(t(lang,"rep_attack"),    callback_data=f"rp_attack_{link_key}"),
+        ],[
+            InlineKeyboardButton(t(lang,"rep_dead_link"), callback_data=f"rp_dead_link_{link_key}"),
+            InlineKeyboardButton(t(lang,"rep_old_base"),  callback_data=f"rp_old_base_{link_key}"),
+        ],[
+            InlineKeyboardButton(t(lang,"rep_bad_cc"),    callback_data=f"rp_bad_cc_{link_key}"),
+            InlineKeyboardButton(t(lang,"rep_other"),     callback_data=f"rp_other_{link_key}"),
+        ]]
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⚠️ {t(lang,'report_q')}\n📌 {source}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    # ── Report reason chosen ──────────────────────────────────
+    if data.startswith("rp_"):
+        # Parse: rp_<reason>_<link_key>
+        parts    = data.split("_", 2)
+        reason   = parts[1] if len(parts) > 1 else "other"
+        link_key = parts[2] if len(parts) > 2 else ""
+        link     = context.user_data.get("links",{}).get(link_key,"?")
+        base     = context.user_data.get("bases",{}).get(link_key,{})
+
+        logger.info(f"Report: reason={reason} link={link[:60]} source={base.get('source_name','?')}")
+
+        # Save report to Supabase
+        if supabase:
+            try:
+                supabase.table("reports").upsert({
+                    "link":        link,
+                    "reason":      reason,
+                    "source":      base.get("source_name",""),
+                    "th_level":    base.get("th"),
+                    "purpose":     base.get("purpose"),
+                    "reported_at": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+            except Exception as e:
+                logger.warning(f"Report save error: {e}")
+
+        # Penalise the base score so it ranks lower next time
+        await update_feedback(link, positive=False)
+
+        await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=t(lang,"report_thanks")
+        )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cancelled. Send /start to try again.")
@@ -788,6 +893,7 @@ def main():
     )
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
+    app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^rp_"))
     logger.info("Bot is starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
