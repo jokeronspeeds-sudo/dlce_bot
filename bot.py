@@ -3,6 +3,7 @@ import logging
 import asyncio
 import re
 import json
+import hashlib
 import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -159,7 +160,7 @@ async def search_youtube(th, purpose):
             title  = item["snippet"]["title"]
             desc   = item["snippet"]["description"]
             links  = re.findall(r'https://link\.clashofclans\.com[^\s"\'<>)]+', desc)
-            if links:
+            if links and f"TH{th}" in clean.upper() or (links and "TH" not in desc.upper()[:200]):
                 clean = links[0].rstrip(".,)&")
                 results.append({
                     "link":      clean,
@@ -445,9 +446,15 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"💬 {reason}\n"
         text += f"\n🔗 {link}"
 
+        # Store link in user_data, use short index in callback (Telegram 64 char limit)
+        link_key = hashlib.md5(link.encode()).hexdigest()[:16]
+        if "links" not in context.user_data:
+            context.user_data["links"] = {}
+        context.user_data["links"][link_key] = link
+
         keyboard = [[
-            InlineKeyboardButton(t(lang, "worked"),   callback_data=f"fb_pos_{link[:60]}"),
-            InlineKeyboardButton(t(lang, "no_defend"), callback_data=f"fb_neg_{link[:60]}"),
+            InlineKeyboardButton(t(lang, "worked"),    callback_data=f"fb_pos_{link_key}"),
+            InlineKeyboardButton(t(lang, "no_defend"), callback_data=f"fb_neg_{link_key}"),
         ]]
         await context.bot.send_message(
             chat_id=chat_id,
@@ -463,7 +470,9 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     lang = context.user_data.get("lang", "en")
     positive = query.data.startswith("fb_pos_")
-    link_part = query.data[7:]
+    link_key = query.data[7:]
+    # Resolve short key back to full link
+    link_part = context.user_data.get("links", {}).get(link_key, link_key)
     await update_feedback(link_part, positive)
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(
