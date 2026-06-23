@@ -719,14 +719,46 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         search_websites(th, purpose),
     )
 
-    # Pick best from each source
-    yt_best     = yt_list[0]     if yt_list     else None
-    reddit_best = reddit_list[0] if reddit_list else None
-    web_best    = web_list[0]    if web_list    else None
-
     purpose_label = t(lang, purpose.lower())
 
-    # If in group — send to DM
+    # ── Build pool of candidates — guaranteed 3 ──────────────
+    # Each source tagged so we can show label
+    all_candidates = []
+    seen_links = set()
+
+    def add_tagged(lst, tag):
+        for b in lst:
+            if b["link"] not in seen_links:
+                seen_links.add(b["link"])
+                b["_tag"] = tag
+                all_candidates.append(b)
+
+    add_tagged(yt_list,     "📺 YouTube")
+    add_tagged(reddit_list, "💬 Reddit")
+    add_tagged(web_list,    "🌐 Web")
+
+    # Sort all by score
+    all_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Try to pick 1 from each source for variety
+    picked = []
+    used_tags = set()
+    for b in all_candidates:
+        if b["_tag"] not in used_tags:
+            picked.append(b)
+            used_tags.add(b["_tag"])
+        if len(picked) == 3:
+            break
+
+    # If still < 3, fill from remaining (any source)
+    if len(picked) < 3:
+        for b in all_candidates:
+            if b not in picked:
+                picked.append(b)
+            if len(picked) == 3:
+                break
+
+    # ── Send to DM if in group ────────────────────────────────
     group_types = ["group","supergroup"]
     is_group    = update.effective_chat.type in group_types if update.effective_chat else False
     if is_group:
@@ -745,15 +777,18 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-    medals = ["📺 YouTube","💬 Reddit","🌐 Web"]
-    sources = [yt_best, reddit_best, web_best]
-    sent = 0
-    for i,(base,label) in enumerate(zip(sources,medals)):
-        if base:
-            lk = hashlib.md5(base["link"].encode()).hexdigest()[:16]
-            await send_card(context.bot, send_to, base, lang, label, lk, context)
-            await db_save(base, th, purpose)
-            sent += 1
+    for i, base in enumerate(picked):
+        label = base.get("_tag", f"#{i+1}")
+        lk    = hashlib.md5(base["link"].encode()).hexdigest()[:16]
+        await send_card(context.bot, send_to, base, lang, label, lk, context)
+        await db_save(base, th, purpose)
+
+    if not picked:
+        await context.bot.send_message(
+            chat_id=send_to,
+            text=t(lang,"no_results")
+        )
+        return ConversationHandler.END
 
     # Deep Research button
     dk = f"{th}_{purpose}_{lang}"
@@ -851,13 +886,117 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /language command — show language picker."""
+    keyboard = [[
+        InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+        InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+        InlineKeyboardButton("🇮🇱 עברית",   callback_data="lang_he"),
+    ]]
+    await update.message.reply_text(
+        "🌍 Choose language / Выбери язык / בחר שפה",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return LANG
+
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = context.user_data.get("lang","en")
+    lines_en = [
+        "🎲 *dlce BASE bot*",
+        "",
+        "/start — Find a base (TH10–18)",
+        "/language — Change language",
+        "/help — This message",
+        "",
+        "*How scoring works:*",
+        "🟢 Fresh = posted <3 months",
+        "🟡 Older = 3–9 months",
+        "🔴 Old = 9+ months",
+        "",
+        "*Steps:*",
+        "1️⃣ Pick TH level",
+        "2️⃣ Pick purpose",
+        "3️⃣ Get 3 bases (YouTube + Reddit + Sites)",
+        "4️⃣ Tap 🏰 to open in game",
+        "5️⃣ Rate with ✅/❌ — bot learns!",
+        "6️⃣ Tap 🔬 Deep Research for 5 more",
+        "",
+        "*In groups:* results go to your DM.",
+    ]
+    lines_ru = [
+        "🎲 *dlce BASE bot*",
+        "",
+        "/start — Найти базу (РЗ10–18)",
+        "/language — Сменить язык",
+        "/help — Это сообщение",
+        "",
+        "*Оценка:*",
+        "🟢 Свежая = <3 месяца",
+        "🟡 Постарше = 3–9 мес.",
+        "🔴 Старая = 9+ мес.",
+        "",
+        "*Шаги:*",
+        "1️⃣ Уровень РУ",
+        "2️⃣ Цель базы",
+        "3️⃣ 3 базы (YouTube + Reddit + Сайты)",
+        "4️⃣ 🏰 открыть в игре",
+        "5️⃣ Оцени ✅/❌ — бот учится!",
+        "6️⃣ 🔬 Глубокий поиск — ещё 5 баз",
+        "",
+        "*В группах:* результаты в личку.",
+    ]
+    lines_he = [
+        "🎲 *dlce BASE bot*",
+        "",
+        "/start — מצא בסיס (TH10–18)",
+        "/language — שנה שפה",
+        "/help — הודעה זו",
+        "",
+        "*דירוג:*",
+        "🟢 חדש = <3 חודשים",
+        "🟡 ישן יותר = 3–9 חוד.",
+        "🔴 ישן = 9+ חוד.",
+        "",
+        "*שלבים:*",
+        "1️⃣ בחר רמת TH",
+        "2️⃣ בחר מטרה",
+        "3️⃣ 3 בסיסים (YouTube + Reddit + אתרים)",
+        "4️⃣ 🏰 לפתוח במשחק",
+        "5️⃣ דרג ✅/❌ — הבוט לומד!",
+        "6️⃣ 🔬 מחקר מעמיק",
+        "",
+        "*בקבוצות:* תוצאות בפרטי.",
+    ]
+    txt_map = {"en": lines_en, "ru": lines_ru, "he": lines_he}
+    msg = "\n".join(txt_map.get(lang, lines_en))
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def post_init(app):
+    """Set bot commands menu shown in Telegram UI."""
+    from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
+    private_cmds = [
+        BotCommand("start",    "🏰 Find a base"),
+        BotCommand("language", "🌍 Change language"),
+        BotCommand("help",     "❓ How to use"),
+    ]
+    group_cmds = [
+        BotCommand("start",    "🏰 Find a base (results in DM)"),
+        BotCommand("help",     "❓ How to use"),
+    ]
+    await app.bot.set_my_commands(private_cmds, scope=BotCommandScopeAllPrivateChats())
+    await app.bot.set_my_commands(group_cmds,   scope=BotCommandScopeAllGroupChats())
+
+
 # ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", group_start)],
+        entry_points=[CommandHandler("start",    group_start),
+                      CommandHandler("language", language_cmd)],
         states={
             LANG:     [CallbackQueryHandler(language_chosen, pattern="^lang_")],
             TH_LEVEL: [CallbackQueryHandler(th_chosen,       pattern="^th_")],
@@ -866,10 +1005,12 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     app.add_handler(conv)
+    app.add_handler(CommandHandler("help",     help_cmd))
+    app.add_handler(CommandHandler("language", language_cmd))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,     pattern="^deep_"))
-    logger.info("dlce BASE bot v5.0 starting...")
+    logger.info("dlce BASE bot v5.1 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
