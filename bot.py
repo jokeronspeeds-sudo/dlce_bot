@@ -1,4 +1,4 @@
-# dlce BASE bot v5.0
+# dlce BASE bot v6.0
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
