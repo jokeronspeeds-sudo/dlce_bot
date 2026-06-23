@@ -1,4 +1,4 @@
-# dlce BASE bot v6.2
+# dlce BASE bot v6.3
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -707,74 +707,97 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Access denied.")
         return
 
-    if not supabase:
-        await update.message.reply_text("No database connected.")
-        return
+    from collections import Counter
+    lines = ["🎲 *dlce BASE bot — Admin Panel*", ""]
 
-    try:
-        # Usage stats
-        usage = supabase.table("usage").select("*").order("searched_at", desc=True).limit(200).execute()
-        rows  = usage.data or []
-        total_searches = len(rows)
-        unique_users   = len(set(r["user_id"] for r in rows))
+    # ── Database stats (if connected) ────────────────────────
+    if supabase:
+        try:
+            usage = supabase.table("usage").select("*").order("searched_at", desc=True).limit(500).execute()
+            rows  = usage.data or []
+            total_searches = len(rows)
+            unique_users   = len(set(r["user_id"] for r in rows))
+            th_counts      = Counter(r["th_level"] for r in rows)
+            purpose_counts = Counter(r["purpose"]  for r in rows)
 
-        # Most searched TH levels
-        from collections import Counter
-        th_counts      = Counter(r["th_level"] for r in rows)
-        purpose_counts = Counter(r["purpose"]  for r in rows)
-        top_th  = th_counts.most_common(3)
-        top_pur = purpose_counts.most_common(3)
+            lines.append("📊 *Usage Stats*")
+            lines.append(f"Total searches: {total_searches}")
+            lines.append(f"Unique users: {unique_users}")
+            lines.append("")
 
-        # Bases with feedback
-        fb_data  = supabase.table("bases").select("*").order("thumbs_up", desc=True).limit(10).execute()
-        good_bases = fb_data.data or []
+            lines.append("🏰 *Top TH Levels*")
+            for th_lv, cnt in th_counts.most_common(5):
+                lines.append(f"  TH{th_lv}: {cnt} searches")
+            lines.append("")
 
-        # Bad bases (more thumbs down than up)
-        bad_data  = supabase.table("reports").select("*").order("reported_at", desc=True).limit(10).execute()
-        bad_bases = bad_data.data or []
+            lines.append("🎯 *Top Purposes*")
+            for pur, cnt in purpose_counts.most_common(3):
+                lines.append(f"  {pur}: {cnt} searches")
+            lines.append("")
 
-        # Build message
-        lines = ["🎲 *dlce BASE bot — Admin Panel*", ""]
+            lines.append("🕐 *Recent searches (last 5)*")
+            for r in rows[:5]:
+                lines.append(f"  @{r.get('username','?')} — TH{r.get('th_level')} {r.get('purpose')} — {str(r.get('searched_at',''))[:16]}")
+            lines.append("")
 
-        lines.append("📊 *Usage Stats*")
-        lines.append(f"Total searches: {total_searches}")
-        lines.append(f"Unique users: {unique_users}")
+        except Exception as e:
+            lines.append(f"⚠️ Usage table error: {e}")
+            lines.append("")
+
+        try:
+            fb_data    = supabase.table("bases").select("*").order("thumbs_up", desc=True).limit(20).execute()
+            good_bases = fb_data.data or []
+            rated = [b for b in good_bases if b.get("thumbs_up",0) + b.get("thumbs_down",0) > 0]
+
+            lines.append("✅ *Top Rated Bases*")
+            if rated:
+                for b in rated[:5]:
+                    up   = b.get("thumbs_up",0)
+                    down = b.get("thumbs_down",0)
+                    pct  = int(up/(up+down)*100)
+                    lines.append(f"  TH{b.get('th_level')} {b.get('purpose')} {pct}% ({up}✅{down}❌) score:{b.get('score','?')}")
+                    lines.append(f"  _{b.get('source','?')}_")
+            else:
+                lines.append("  No feedback yet")
+            lines.append("")
+
+        except Exception as e:
+            lines.append(f"⚠️ Bases table error: {e}")
+            lines.append("")
+
+        try:
+            bad_data  = supabase.table("reports").select("*").order("reported_at", desc=True).limit(10).execute()
+            bad_bases = bad_data.data or []
+
+            lines.append("⚠️ *Recent Reports*")
+            if bad_bases:
+                for r in bad_bases[:5]:
+                    lines.append(f"  {r.get('reason','?')} — TH{r.get('th_level')} {r.get('purpose','?')} — {r.get('source','?')}")
+            else:
+                lines.append("  No reports yet")
+            lines.append("")
+
+        except Exception as e:
+            lines.append(f"⚠️ Reports table error: {e}")
+
+    else:
+        lines.append("⚠️ *Database not connected*")
+        lines.append("Fix: update SUPABASE_KEY in Railway variables")
+        lines.append("Get key from: Supabase → Settings → API → anon/public")
         lines.append("")
 
-        lines.append("🏰 *Top TH Levels*")
-        for th, cnt in top_th:
-            lines.append(f"  TH{th}: {cnt} searches")
-        lines.append("")
+    # ── Bot status (always shown) ─────────────────────────────
+    lines.append("🤖 *Bot Status*")
+    lines.append(f"  Version: v6.2")
+    lines.append(f"  Database: {'✅ Connected' if supabase else '❌ Not connected'}")
+    lines.append(f"  YouTube API: configured")
+    lines.append(f"  Admin ID: {ADMIN_ID}")
 
-        lines.append("🎯 *Top Purposes*")
-        for pur, cnt in top_pur:
-            lines.append(f"  {pur}: {cnt} searches")
-        lines.append("")
+    msg = chr(10).join(lines)
+    if len(msg) > 4000:
+        msg = msg[:3900] + chr(10) + "...(truncated)"
 
-        lines.append("✅ *Top Rated Bases*")
-        for b in good_bases[:5]:
-            up   = b.get("thumbs_up",0)
-            down = b.get("thumbs_down",0)
-            if up + down == 0: continue
-            pct  = int(up/(up+down)*100)
-            lines.append(f"  TH{b.get('th_level')} {b.get('purpose')} — {pct}% defence rate ({up}✅ {down}❌)")
-            lines.append(f"  {b.get('source','?')} | score {b.get('score','?')}")
-        lines.append("")
-
-        lines.append("⚠️ *Reported Bad Bases (last 10)*")
-        for r in bad_bases[:5]:
-            lines.append(f"  {r.get('reason','?')} — {r.get('source','?')} TH{r.get('th_level')} {r.get('purpose','?')}")
-            lines.append(f"  {(r.get('link') or '')[:55]}")
-
-        msg = chr(10).join(lines)
-        # Split if too long
-        if len(msg) > 4000:
-            msg = msg[:4000] + "\n...(truncated)"
-
-        await update.message.reply_text(msg, parse_mode="Markdown")
-
-    except Exception as e:
-        await update.message.reply_text(f"Admin error: {e}")
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def db_feedback(link, positive):
     if not supabase: return
@@ -1288,7 +1311,7 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,     pattern="^deep_"))
-    logger.info("dlce BASE bot v6.2 starting...")
+    logger.info("dlce BASE bot v6.3 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
