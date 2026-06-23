@@ -1,4 +1,4 @@
-# dlce BASE bot v6.0
+# dlce BASE bot v6.1
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -29,10 +29,13 @@ claude = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
 supabase = None
 try:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.info("Supabase connected")
+    if SUPABASE_URL and SUPABASE_KEY and len(SUPABASE_KEY) > 20:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase connected OK")
+    else:
+        logger.warning("Supabase: missing or short key — skipping DB")
 except Exception as e:
-    logger.warning(f"Supabase skipped: {e}")
+    logger.warning(f"Supabase skipped (bot works without it): {e}")
 
 LANG, TH_LEVEL, PURPOSE = range(3)
 
@@ -495,9 +498,9 @@ async def search_reddit(th, purpose, sort="new", limit=25):
     results = []
     try:
         pkw = {"WAR":"war base anti 3 star","RANK":"trophy base","FARM":"farming base"}
-        url = (f"https://www.reddit.com/r/ClashOfClans/search.json"
+        url = (f"https://old.reddit.com/r/ClashOfClans/search.json"
                f"?q=TH{th}+{quote_plus(pkw.get(purpose,'base'))}&sort={sort}&limit={limit}&restrict_sr=1")
-        async with httpx.AsyncClient(timeout=15, headers={"User-Agent":"dlce-base-bot/1.0"}) as c:
+        async with httpx.AsyncClient(timeout=15, headers={"User-Agent":"Mozilla/5.0 (compatible; dlce-base-finder/1.0; +https://t.me/dlce_basefinder_bot)"}) as c:
             data = (await c.get(url)).json()
         for post in data.get("data",{}).get("children",[]):
             p       = post.get("data",{})
@@ -540,11 +543,11 @@ async def search_reddit(th, purpose, sort="new", limit=25):
 # SOURCE 3 — MULTIPLE BASE WEBSITES
 # ══════════════════════════════════════════════════════════════
 BASE_SITES = [
-    ("cocbases.com",    "https://cocbases.com/th{th}-{slug}-base/",         {"WAR":"war","RANK":"trophy","FARM":"farming"}),
+    ("cocbases.com",    "https://cocbases.com/th{th}-{slug}-base/",         {"WAR":"war","RANK":"trophies","FARM":"farming"}),
     ("clashtrack.com",  "https://www.clashtrack.com/th{th}/{slug}-base",     {"WAR":"war","RANK":"trophy","FARM":"farm"}),
     ("cocbasebuilder.com","https://www.cocbasebuilder.com/th{th}-{slug}-base/",{"WAR":"war","RANK":"trophy","FARM":"farming"}),
     ("clashofclansbase.com","https://clashofclansbase.com/th{th}-{slug}-base/",{"WAR":"war","RANK":"trophy","FARM":"farming"}),
-    ("clashbases.com",  "https://www.clashbases.de/th{th}-{slug}/",          {"WAR":"war","RANK":"trophy","FARM":"farming"}),
+    ("clashbases.de",   "https://www.clashbases.de/Clash-of-Clans-Town-Hall-{th}-Bases/",{"WAR":"war","RANK":"trophy","FARM":"farming"}),
 ]
 
 async def search_websites(th, purpose):
@@ -974,6 +977,27 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_card(context.bot, send_to, base, lang, label, lk, context)
         await db_save(base, th, purpose)
 
+    # Last resort — use built-in database if everything failed
+    if not picked:
+        logger.info("All sources failed — using BUILTIN database")
+        builtin = BUILTIN.get(th, {}).get(purpose, [])
+        for b in builtin[:3]:
+            base = dict(b)
+            base.update({
+                "source_name": "CoC Community",
+                "source_url":  f"https://cocbases.com/",
+                "src_tag":     "web",
+                "image_type":  "none",
+                "image_url":   None,
+                "views": 0, "likes": 0,
+                "views_fmt": "", "likes_fmt": "",
+                "comment_grade": 0, "comment_summary": "",
+            })
+            base["cc"]    = get_cc(th, purpose)
+            base["score"] = calc_score(base)
+            base["_tag"]  = "🗄 Built-in"
+            picked.append(base)
+
     if not picked:
         await context.bot.send_message(
             chat_id=send_to,
@@ -1202,7 +1226,7 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,     pattern="^deep_"))
-    logger.info("dlce BASE bot v6.0 starting...")
+    logger.info("dlce BASE bot v6.1 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
