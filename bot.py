@@ -21,6 +21,7 @@ CLAUDE_API_KEY  = os.environ["CLAUDE_API_KEY"]
 YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
 SUPABASE_URL    = os.environ["SUPABASE_URL"]
 SUPABASE_KEY    = os.environ["SUPABASE_KEY"]
+ADMIN_ID        = int(os.environ.get("ADMIN_ID", "0"))  # your Telegram user ID
 
 genai.configure(api_key=GEMINI_API_KEY)
 gemini = genai.GenerativeModel("gemini-2.0-flash")
@@ -230,36 +231,76 @@ def get_cc(th, purpose, extracted=""):
 # ══════════════════════════════════════════════════════════════
 def calc_score(base: dict) -> int:
     """
-    Score formula (100 pts total):
-      Recency    35 pts  — newer = better (meta changes every patch)
-      Views      25 pts  — real community interest
-      Likes/Ups  20 pts  — active approval
-      Downloads  10 pts  — base site popularity
-      Stars      10 pts  — site rating
+    Score formula v2 — designed to surface actually-defending bases.
+
+    Points (100 total):
+      Recency          30  — CoC meta changes every update; old = useless
+      Like/view ratio  20  — high ratio = community actually loves it (not just viral)
+      Raw engagement   15  — views + upvotes (reach)
+      Comment grade    15  — AI sentiment from real player comments (0-15)
+      User feedback    10  — our own thumbs up/down from bot users
+      Source quality   10  — cocbases/top-creator > random YouTube > unknown
+
+    Why ratio matters: a 50K-view video with 5K likes beats a 1M-view clickbait
+    with 10K likes. The ratio filters out attack-strategy content.
     """
     now = datetime.now(timezone.utc)
+
+    # Recency (30 pts)
     try:
         y, m = int(base.get("date","2024-01")[:4]), int(base.get("date","2024-01")[5:7])
-        months_old = (now.year - y)*12 + (now.month - m)
-        if months_old <= 1:  rec = 35
-        elif months_old <= 3: rec = 28
-        elif months_old <= 6: rec = 20
-        elif months_old <= 12: rec = 10
+        mo = (now.year - y)*12 + (now.month - m)
+        if mo <= 1:  rec = 30
+        elif mo <= 3: rec = 25
+        elif mo <= 6: rec = 18
+        elif mo <= 12: rec = 8
         else: rec = 0
     except Exception:
         rec = 0
 
-    views  = min(base.get("views", 0), 1_000_000)
-    likes  = min(base.get("likes", 0), 100_000)
-    dl     = min(base.get("downloads", 0), 200_000)
-    stars  = min(base.get("stars", 0), 5.0)
+    # Like-to-view ratio (20 pts) — key signal that content is genuinely useful
+    views = max(base.get("views", 0), 1)
+    likes = base.get("likes", 0)
+    ratio = likes / views
+    if ratio >= 0.08:   ratio_pts = 20   # 8%+ = exceptional
+    elif ratio >= 0.05: ratio_pts = 15
+    elif ratio >= 0.03: ratio_pts = 10
+    elif ratio >= 0.01: ratio_pts = 5
+    else:               ratio_pts = 0
 
-    view_pts  = int(views  / 1_000_000 * 25)
-    like_pts  = int(likes  / 100_000   * 20)
-    dl_pts    = int(dl     / 200_000   * 10)
-    star_pts  = int(stars  / 5.0       * 10)
+    # Raw engagement (15 pts)
+    raw_views = min(base.get("views", 0), 500_000)
+    raw_ups   = min(base.get("likes", 0), 50_000)
+    dl        = min(base.get("downloads", 0), 200_000)
+    eng_pts = int((raw_views/500_000*8) + (raw_ups/50_000*4) + (dl/200_000*3))
 
-    total = rec + view_pts + like_pts + dl_pts + star_pts
+    # Comment grade from AI sentiment analysis (15 pts) — set by search function
+    comment_pts = min(15, base.get("comment_grade", 0))
+
+    # User feedback from our own bot (10 pts)
+    ups   = base.get("thumbs_up", 0)
+    downs = base.get("thumbs_down", 0)
+    total_fb = ups + downs
+    if total_fb > 0:
+        fb_ratio = ups / total_fb
+        fb_pts = int(fb_ratio * 10)
+    else:
+        fb_pts = 5  # neutral default
+
+    # Source quality (10 pts)
+    src = base.get("source_name", "").lower()
+    if any(k in src for k in ["cocbases","clashtrack","clashbases"]):
+        src_pts = 10
+    elif "youtube" in src and any(k in src.lower() for k in ["itzu","kenny","eric","judo"]):
+        src_pts = 9   # known top creators
+    elif "youtube" in src:
+        src_pts = 6
+    elif "reddit" in src:
+        src_pts = 5
+    else:
+        src_pts = 4
+
+    total = rec + ratio_pts + eng_pts + comment_pts + fb_pts + src_pts
     return max(10, min(100, total))
 
 def freshness_dot(date_str, lang):
@@ -379,6 +420,7 @@ async def search_youtube(th, purpose, max_results=15, order="date"):
                 cc_raw = ""
                 m = re.search(r'(?:clan castle|cc)[:\s\-]+([^\n\.\!\?]{5,80})', desc.lower())
                 if m: cc_raw = m.group(1)
+                comment_grade, comment_summary = await get_comment_grade(vid)
                 b = {
                     "link": clean, "cc": get_cc(th, purpose, cc_raw),
                     "source_name": f"YouTube · {ch}", "source_url": f"https://youtube.com/watch?v={vid}",
@@ -387,6 +429,8 @@ async def search_youtube(th, purpose, max_results=15, order="date"):
                     "views_fmt": f"{views//1000}K" if views>=1000 else str(views),
                     "likes_fmt": f"{likes//1000}K" if likes>=1000 else str(likes),
                     "downloads": views//10, "stars": min(5.0,3.0+likes/max(views,1)*30),
+                    "comment_grade": comment_grade,
+                    "comment_summary": comment_summary,
                 }
                 b["score"] = calc_score(b)
                 results.append(b)
@@ -395,6 +439,53 @@ async def search_youtube(th, purpose, max_results=15, order="date"):
         logger.warning(f"YouTube error: {e}")
     results.sort(key=lambda x: x["score"], reverse=True)
     return results
+
+
+async def get_comment_grade(vid_id: str) -> tuple[int, str]:
+    """
+    Fetch top comments for a YouTube video and ask Gemini to grade
+    whether the community thinks the base actually defends.
+    Returns (grade 0-15, short summary string).
+    """
+    try:
+        url = (f"https://www.googleapis.com/youtube/v3/commentThreads"
+               f"?part=snippet&videoId={vid_id}&maxResults=30"
+               f"&order=relevance&key={YOUTUBE_API_KEY}")
+        async with httpx.AsyncClient(timeout=10) as c:
+            data = (await c.get(url)).json()
+
+        if "error" in data or not data.get("items"):
+            return 5, ""   # neutral if no comments
+
+        comments = []
+        for item in data.get("items", []):
+            text = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+            likes = item["snippet"]["topLevelComment"]["snippet"]["likeCount"]
+            comments.append(f"[{likes} likes] {text[:200]}")
+
+        comments_text = "\\n".join(comments[:20])
+
+        parts = [
+            "These are YouTube comments on a Clash of Clans base layout video.\n\n",
+            comments_text,
+            "\n\nBased ONLY on these comments, rate how well this base defends.\n",
+            "Look for: defended well, 2-starred, 3-starred, link worked, good layout.\n",
+            "Ignore hype/spam. Reply ONLY as JSON (no markdown):\n",
+            '{"grade": 7, "summary": "community thinks base is solid"}',
+        ]
+        prompt = "".join(parts)
+
+        resp = gemini.generate_content(prompt)
+        raw  = re.sub(r"```json|```", "", resp.text).strip()
+        parsed = json.loads(raw)
+        grade   = max(0, min(15, int(parsed.get("grade", 5))))
+        summary = parsed.get("summary", "")[:100]
+        logger.info(f"Comment grade for {vid_id}: {grade}/15 — {summary}")
+        return grade, summary
+
+    except Exception as e:
+        logger.warning(f"Comment grade error: {e}")
+        return 5, ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -530,6 +621,96 @@ async def db_save(base, th, purpose):
     except Exception as e:
         logger.warning(f"DB save: {e}")
 
+async def db_track_usage(user_id: int, username: str, th: int, purpose: str):
+    """Track every search for admin analytics."""
+    if not supabase: return
+    try:
+        supabase.table("usage").insert({
+            "user_id":   str(user_id),
+            "username":  username or "unknown",
+            "th_level":  th,
+            "purpose":   purpose,
+            "searched_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception as e:
+        logger.warning(f"DB track: {e}")
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only command — shows usage stats, feedback table, bad bases."""
+    user_id = update.effective_user.id
+    if ADMIN_ID and user_id != ADMIN_ID:
+        await update.message.reply_text("Access denied.")
+        return
+
+    if not supabase:
+        await update.message.reply_text("No database connected.")
+        return
+
+    try:
+        # Usage stats
+        usage = supabase.table("usage").select("*").order("searched_at", desc=True).limit(200).execute()
+        rows  = usage.data or []
+        total_searches = len(rows)
+        unique_users   = len(set(r["user_id"] for r in rows))
+
+        # Most searched TH levels
+        from collections import Counter
+        th_counts      = Counter(r["th_level"] for r in rows)
+        purpose_counts = Counter(r["purpose"]  for r in rows)
+        top_th  = th_counts.most_common(3)
+        top_pur = purpose_counts.most_common(3)
+
+        # Bases with feedback
+        fb_data  = supabase.table("bases").select("*").order("thumbs_up", desc=True).limit(10).execute()
+        good_bases = fb_data.data or []
+
+        # Bad bases (more thumbs down than up)
+        bad_data  = supabase.table("reports").select("*").order("reported_at", desc=True).limit(10).execute()
+        bad_bases = bad_data.data or []
+
+        # Build message
+        lines = ["🎲 *dlce BASE bot — Admin Panel*", ""]
+
+        lines.append("📊 *Usage Stats*")
+        lines.append(f"Total searches: {total_searches}")
+        lines.append(f"Unique users: {unique_users}")
+        lines.append("")
+
+        lines.append("🏰 *Top TH Levels*")
+        for th, cnt in top_th:
+            lines.append(f"  TH{th}: {cnt} searches")
+        lines.append("")
+
+        lines.append("🎯 *Top Purposes*")
+        for pur, cnt in top_pur:
+            lines.append(f"  {pur}: {cnt} searches")
+        lines.append("")
+
+        lines.append("✅ *Top Rated Bases*")
+        for b in good_bases[:5]:
+            up   = b.get("thumbs_up",0)
+            down = b.get("thumbs_down",0)
+            if up + down == 0: continue
+            pct  = int(up/(up+down)*100)
+            lines.append(f"  TH{b.get('th_level')} {b.get('purpose')} — {pct}% defence rate ({up}✅ {down}❌)")
+            lines.append(f"  {b.get('source','?')} | score {b.get('score','?')}")
+        lines.append("")
+
+        lines.append("⚠️ *Reported Bad Bases (last 10)*")
+        for r in bad_bases[:5]:
+            lines.append(f"  {r.get('reason','?')} — {r.get('source','?')} TH{r.get('th_level')} {r.get('purpose','?')}")
+            lines.append(f"  {(r.get('link') or '')[:55]}")
+
+        msg = chr(10).join(lines)
+        # Split if too long
+        if len(msg) > 4000:
+            msg = msg[:4000] + "\n...(truncated)"
+
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    except Exception as e:
+        await update.message.reply_text(f"Admin error: {e}")
+
 async def db_feedback(link, positive):
     if not supabase: return
     try:
@@ -588,8 +769,8 @@ async def send_card(bot, chat_id, base, lang, label, link_key, context, is_recom
         stats = f"⬇️ {dl//1000}K" if dl>=1000 else f"⬇️ {dl}"
 
     rec_line = f"*{t(lang,'recommended')}*\n" if is_recommended else ""
+    comment_summary = base.get("comment_summary", "")
 
-    # Compact caption
     caption = (
         f"{rec_line}"
         f"{label}\n"
@@ -602,6 +783,8 @@ async def send_card(bot, chat_id, base, lang, label, link_key, context, is_recom
         f"🏰 {t(lang,'cc',cc=cc)}\n"
         f"📌 _{source_name}_"
     )
+    if comment_summary:
+        caption += f"\n💬 _{comment_summary}_"
 
     row1 = [InlineKeyboardButton(t(lang,"open_btn"), url=link)]
     if source_url:
@@ -711,6 +894,14 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["bases"]   = {}
 
     await query.edit_message_text(t(lang,"searching"))
+
+    # Track usage for admin analytics
+    user = update.effective_user
+    await db_track_usage(
+        user.id if user else 0,
+        user.username or user.first_name or "?" if user else "?",
+        th, purpose
+    )
 
     # Run all 3 source searches in parallel
     yt_list, reddit_list, web_list = await asyncio.gather(
@@ -969,7 +1160,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*בקבוצות:* תוצאות בפרטי.",
     ]
     txt_map = {"en": lines_en, "ru": lines_ru, "he": lines_he}
-    msg = "\n".join(txt_map.get(lang, lines_en))
+    msg = "\\n".join(txt_map.get(lang, lines_en))
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -1007,10 +1198,11 @@ def main():
     app.add_handler(conv)
     app.add_handler(CommandHandler("help",     help_cmd))
     app.add_handler(CommandHandler("language", language_cmd))
+    app.add_handler(CommandHandler("admin",    admin_panel))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,     pattern="^deep_"))
-    logger.info("dlce BASE bot v5.1 starting...")
+    logger.info("dlce BASE bot v6.0 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
