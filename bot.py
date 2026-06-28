@@ -1,4 +1,4 @@
-# dlce BASE bot v7.0
+# dlce BASE bot v7.1
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -70,16 +70,26 @@ def is_base_link(link: str) -> bool:
 # ══════════════════════════════════════════════════════════════
 T = {
     "en": {
-        "welcome":        "🎲 *dlce BASE bot*\n\nFinds the best CoC bases from YouTube, Reddit & 5 base sites — with real stats & CC troops.\n\nChoose language:",
+        "welcome":        "🎲 *dlce BASE bot*\n\nFind the best CoC bases from YouTube, Reddit & base sites — with real stats & CC troops.\n\nChoose language:",
+        "q_category":     "🎯 What are you looking for?",
+        "cat_bases":      "🏰 Base Finder",
+        "cat_guides":     "📖 Guides",
         "q_th":           "🏰 Select Town Hall level:",
         "q_purpose":      "🎯 Purpose?",
+        "q_guide_topic":  "📖 Choose a topic:",
+        "guide_attack":   "⚔️ Attack Guide",
+        "guide_equip":    "🎒 Equipment",
+        "guide_heroes":   "🦸 Heroes",
+        "guide_bh":       "🔨 Builder Hall",
+        "guide_q_th":     "⚔️ Choose TH level for attack guide:",
+        "watch_video":    "▶️ Watch Video",
+        "back_main":      "🏠 Main Menu",
         "searching":      "🔍 Searching all sources...",
         "dm_notice":      "📩 Results sent to your DM!",
         "dm_intro":       "🎲 *dlce BASE bot*\nTH{th} · {purpose}\n",
         "recommended":    "⭐ RECOMMENDED",
         "score":          "{score}/100",
         "cc":             "CC: {cc}",
-        "date_label":     "{date}",
         "open_btn":       "🏰 Copy Base",
         "source_btn":     "📌 Source",
         "worked":         "✅ Works",
@@ -87,7 +97,7 @@ T = {
         "report_btn":     "⚠️ Report",
         "thanks_good":    "🎉 Score +1. Thanks!",
         "thanks_bad":     "📉 Score -1. Thanks!",
-        "report_q":       "What's wrong?",
+        "report_q":       "What\'s wrong?",
         "rep_wrong_th":   "❌ Wrong TH",
         "rep_attack":     "⚔️ Attack video",
         "rep_dead_link":  "🔗 Broken link",
@@ -108,21 +118,31 @@ T = {
         "src_yt":         "📺 YouTube",
         "src_reddit":     "💬 Reddit",
         "src_web":        "🌐 Web",
-        "group_msg":      "👋 Hi! I work best in DMs.\nTap the button below to get bases in private:",
+        "group_msg":      "👋 Hi! I work best in DMs.\nTap below to get results privately:",
         "open_dm":        "💬 Open DM",
     },
     "ru": {
-        "welcome":        "🎲 *dlce BASE bot*\n\nНахожу лучшие базы с YouTube, Reddit и 5 сайтов — с реальной статистикой и войсками ЗК.\n\nВыбери язык:",
+        "welcome":        "🎲 *dlce BASE bot*\n\nНахожу лучшие базы с YouTube, Reddit и сайтов — с реальной статистикой и войсками ЗК.\n\nВыбери язык:",
+        "q_category":     "🎯 Что ищешь?",
+        "cat_bases":      "🏰 Поиск базы",
+        "cat_guides":     "📖 Гайды",
         "q_th":           "🏰 Уровень ратуши:",
         "q_purpose":      "🎯 Цель базы?",
+        "q_guide_topic":  "📖 Выбери тему:",
+        "guide_attack":   "⚔️ Гайд по атаке",
+        "guide_equip":    "🎒 Снаряжение",
+        "guide_heroes":   "🦸 Герои",
+        "guide_bh":       "🔨 Билдер Холл",
+        "guide_q_th":     "⚔️ Выбери ТХ для гайда по атаке:",
+        "watch_video":    "▶️ Смотреть видео",
+        "back_main":      "🏠 Главное меню",
         "searching":      "🔍 Ищу во всех источниках...",
         "dm_notice":      "📩 Результаты отправлены в личку!",
-        "dm_intro":       "🎲 *dlce BASE bot*\nРУ{th} · {purpose}\n",
+        "dm_intro":       "🎲 *dlce BASE bot*\nТХ{th} · {purpose}\n",
         "recommended":    "⭐ РЕКОМЕНДУЕМ",
         "score":          "{score}/100",
         "cc":             "ЗК: {cc}",
-        "date_label":     "{date}",
-        "open_btn":       "🏰 Скопировать",
+        "open_btn":       "🏰 Скопировать базу",
         "source_btn":     "📌 Источник",
         "worked":         "✅ Устояла",
         "no_defend":      "❌ Не устояла",
@@ -136,10 +156,10 @@ T = {
         "rep_old_base":   "📅 Слишком старая",
         "rep_bad_cc":     "🏰 Неверные войска",
         "rep_other":      "🤷 Другое",
-        "report_thanks":  "✅ Репорт отправлен!",
+        "report_thanks":  "✅ Репорт принят! Бот учтёт.",
         "deep_btn":       "🔬 Глубокий поиск (+5 баз)",
-        "deep_header":    "🔬 Глубокий поиск — РУ{th} {purpose}",
-        "deep_searching": "🔬 Глубокий поиск (~30с)...",
+        "deep_header":    "🔬 Глубокий поиск — ТХ{th} {purpose}",
+        "deep_searching": "🔬 Глубокий поиск (~30 сек)...",
         "rank":           "🏆 РАНГ",
         "war":            "⚔️ ВОЙНА",
         "farm":           "💰 ФАРМ",
@@ -154,16 +174,26 @@ T = {
         "open_dm":        "💬 Написать в личку",
     },
     "he": {
-        "welcome":        "🎲 *dlce BASE bot*\n\nמוצא בסיסים מ-YouTube, Reddit ו-5 אתרים — עם סטטיסטיקות וחיילי טירה.\n\nבחר שפה:",
+        "welcome":        "🎲 *dlce BASE bot*\n\nמוצא בסיסים מ-YouTube, Reddit ואתרים — עם סטטיסטיקות וחיילי טירה.\n\nבחר שפה:",
+        "q_category":     "🎯 מה אתה מחפש?",
+        "cat_bases":      "🏰 מוצא בסיסים",
+        "cat_guides":     "📖 מדריכים",
         "q_th":           "🏰 רמת עיירת מועצה:",
         "q_purpose":      "🎯 מטרת הבסיס?",
+        "q_guide_topic":  "📖 בחר נושא:",
+        "guide_attack":   "⚔️ מדריך התקפה",
+        "guide_equip":    "🎒 ציוד",
+        "guide_heroes":   "🦸 גיבורים",
+        "guide_bh":       "🔨 Builder Hall",
+        "guide_q_th":     "⚔️ בחר רמת TH למדריך:",
+        "watch_video":    "▶️ צפה בסרטון",
+        "back_main":      "🏠 תפריט ראשי",
         "searching":      "🔍 מחפש בכל המקורות...",
         "dm_notice":      "📩 התוצאות נשלחו בפרטי!",
         "dm_intro":       "🎲 *dlce BASE bot*\nTH{th} · {purpose}\n",
         "recommended":    "⭐ מומלץ",
         "score":          "{score}/100",
         "cc":             "טירה: {cc}",
-        "date_label":     "{date}",
         "open_btn":       "🏰 העתק בסיס",
         "source_btn":     "📌 מקור",
         "worked":         "✅ עמד",
@@ -178,7 +208,7 @@ T = {
         "rep_old_base":   "📅 ישן מדי",
         "rep_bad_cc":     "🏰 טירה שגויה",
         "rep_other":      "🤷 אחר",
-        "report_thanks":  "✅ דווח!",
+        "report_thanks":  "✅ דווח! הבוט לומד.",
         "deep_btn":       "🔬 מחקר מעמיק (+5 בסיסים)",
         "deep_header":    "🔬 מחקר מעמיק — TH{th} {purpose}",
         "deep_searching": "🔬 מחקר מעמיק (~30 שניות)...",
@@ -193,9 +223,10 @@ T = {
         "src_reddit":     "💬 Reddit",
         "src_web":        "🌐 אתרים",
         "group_msg":      "👋 שלום! אני עובד טוב יותר בפרטי.\nלחץ על הכפתור:",
-        "open_dm":        "💬 פתח צ'אט פרטי",
+        "open_dm":        "💬 פתח צ\'אט פרטי",
     },
 }
+
 
 def t(lang, key, **kwargs):
     text = T.get(lang, T["en"]).get(key, key)
@@ -1060,7 +1091,7 @@ async def language_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InlineKeyboardButton(t(lang,"cat_guides"), callback_data="cat_guides"),
     ]]
     await query.edit_message_text(
-        f"✅ Language set!\n\n{t(lang,'q_category')}",
+        t(lang,"q_category"),
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return CATEGORY
@@ -1158,10 +1189,10 @@ async def send_guide(query, lang: str, guide: dict):
     keyboard_rows = []
     if video:
         keyboard_rows.append([
-            InlineKeyboardButton("▶️ Смотреть видео", url=video)
+            InlineKeyboardButton(t(lang,"watch_video"), url=video)
         ])
     keyboard_rows.append([
-        InlineKeyboardButton("⬅️ Главное меню", callback_data="back_to_main")
+        InlineKeyboardButton(t(lang,"back_main"), callback_data="back_to_main")
     ])
     markup = InlineKeyboardMarkup(keyboard_rows)
 
@@ -1507,13 +1538,14 @@ async def post_init(app):
     """Set bot commands menu shown in Telegram UI."""
     from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
     private_cmds = [
-        BotCommand("start",    "🏰 Bases & Guides"),
+        BotCommand("start",    "🎲 Base Finder + Guides"),
         BotCommand("language", "🌍 Change language"),
-        BotCommand("help",     "❓ How to use"),
+        BotCommand("help",     "❓ How the bot works"),
+        BotCommand("admin",    "🔐 Admin panel"),
     ]
     group_cmds = [
-        BotCommand("start",    "🏰 Bases & Guides (DM)"),
-        BotCommand("help",     "❓ How to use"),
+        BotCommand("start",    "🎲 Base Finder + Guides (results in DM)"),
+        BotCommand("help",     "❓ How the bot works"),
     ]
     await app.bot.set_my_commands(private_cmds, scope=BotCommandScopeAllPrivateChats())
     await app.bot.set_my_commands(group_cmds,   scope=BotCommandScopeAllGroupChats())
@@ -1545,7 +1577,7 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
     app.add_handler(CallbackQueryHandler(back_to_main_handler,pattern="^back_to_main"))
-    logger.info("dlce BASE bot v7.0 starting...")
+    logger.info("dlce BASE bot v7.1 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
