@@ -1,4 +1,4 @@
-# dlce BASE bot v6.3
+# dlce BASE bot v7.0
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -37,7 +37,7 @@ try:
 except Exception as e:
     logger.warning(f"Supabase skipped (bot works without it): {e}")
 
-LANG, TH_LEVEL, PURPOSE = range(3)
+LANG, CATEGORY, TH_LEVEL, PURPOSE, GUIDE_TOPIC, GUIDE_ATTACK_TH = range(6)
 
 # ══════════════════════════════════════════════════════════════
 # LINK VALIDATION — base vs troops
@@ -904,6 +904,114 @@ async def send_card(bot, chat_id, base, lang, label, link_key, context, is_recom
                                reply_markup=markup, parse_mode="Markdown")
 
 
+
+# ══════════════════════════════════════════════════════════════
+# GUIDE CONTENT
+# ══════════════════════════════════════════════════════════════
+
+GUIDE_ATTACK = {
+    12: {
+        "title": "⚔️ Атака Ратуши 12",
+        "text": (
+            "Первое видео для Ратуши 12 уровня!\n\n"
+            "Буду рад вашим советам и просьбам к следующим видео.\n"
+            "П.с. Это закончил резко — чтоб не тратить время.\n"
+            "В след раз буду по повторам показывать а не «онлайн» 😂"
+        ),
+        "video": "https://youtu.be/pvISNy7Vt4U?si=bxdxgZRVjeIEaD1G",
+    },
+    13: {
+        "title": "⚔️ Атака Ратуши 13",
+        "text": (
+            "*Тактика: Драконы + Дирижабль*\n\n"
+            "1️⃣ Находим сторону с Орлиной Артиллерией.\n"
+            "С одного бока — Королева (сразу способность), с другого — Принц (сразу способность)\n\n"
+            "2️⃣ Между ними выпускаем войско: шары → драконы → хранитель → чемпионка.\n"
+            "Ждём пару сек → Дирижабль (летит к Ратуше)\n\n"
+            "3️⃣ Используем способность Хранителя (спасаем Дирижабль)\n\n"
+            "4️⃣ По бокам от ратуши кидаем 2 зелья Тотема (примут урон → Дирик доедет)\n\n"
+            "5️⃣ Дирижабль у ратуши → зелье Клонов → выпускаем Ети → Ярость на него\n\n"
+            "6️⃣ 6 морозов для контроля: Адские башни и ПВО"
+        ),
+        "video": "https://youtu.be/biH2TBQbPOM?si=1ACDVLUeA-vYvrhJ",
+    },
+    14: {
+        "title": "⚔️ Атака Ратуши 14",
+        "text": (
+            "*Тактика: Драконы + Дирижабль (улучшенная)*\n\n"
+            "1️⃣ Находим Орлиную Артиллерию.\n"
+            "С одного бока — Королева (сразу способность), с другого — Принц (сразу способность)\n\n"
+            "2️⃣ Войско: шары → наездники на драконах → драконы → хранитель → чемпионка.\n"
+            "Ждём → Дирижабль\n\n"
+            "3️⃣ Способность Хранителя для защиты Дирижабля\n\n"
+            "4️⃣ По бокам от ратуши: 1 тотем + 1 фриз (или 2 тотема)\n\n"
+            "5️⃣ Дирижабль у ратуши → *2 зелья Клонов 7 уровня* (38 мест!) → Супер-Ети → Ярость\n\n"
+            "6️⃣ 3 мороза: Адские башни + ПВО\n\n"
+            "⚠️ Важно: Зелья Клонов должны быть *7 уровня*!"
+        ),
+        "video": "https://youtu.be/Wye_Dr_4sb8?si=I2vEqgA5AFV-iJSp",
+    },
+    15: {
+        "title": "⚔️ Атака Ратуши 15",
+        "text": (
+            "*Тактика: Смешанная армия*\n\n"
+            "1️⃣ Находим Орлиную Артиллерию → кидаем Чемпионку ближе к ней.\n"
+            "Делаем проходку под зельем невидимости — забираем ОА или чистим путь.\n"
+            "Забираем Чемпионку зельем возврата.\n\n"
+            "2️⃣ Всё войско (кроме Королевы и мух) — левее проходки.\n"
+            "Там же метатель войск + Король + Чемпионка\n\n"
+            "3️⃣ Королеву кидаем в конец той стороны где напали — подчистит край, войско не разбежится!\n\n"
+            "4️⃣ 3 морозных зелья для контроля ситуации\n\n"
+            "⚠️ Главное: войско должно оставаться *кучно*!"
+        ),
+        "video": "https://youtu.be/nQr_qbCzdJ0?si=yB11d3Y8fQoOfAjy",
+    },
+    16: {
+        "title": "⚔️ Атака Ратуши 16",
+        "text": (
+            "🔜 *Гайд по ТХ16 скоро будет добавлен!*\n\n"
+            "Следи за обновлениями бота."
+        ),
+        "video": None,
+    },
+}
+
+GUIDE_BH = {
+    "title": "🔨 Builder Hall — Фарм золота столицы",
+    "text": (
+        "*⚔️ Как фармить 22,000+ золота столицы за рейд*\n\n"
+        "Если ты получаешь 6–8к за атаку — ты делаешь это неправильно!\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "*🟠 Шаг 1: Нужен клан 10 уровня*\n"
+        "Наш клан dlce уже 10 уровень 💪\n"
+        "Войско: *10 шахтёров* + 1 мороз + 2 зелья скелетиков\n\n"
+        "*🟣 Шаг 2: Атакуй любую деревню*\n"
+        "• Заморозку на башни по группе: арбалет, ракетницы, Инферно, маги, теслы\n"
+        "• 2 зелья скелетов — в края или скопление деффа\n"
+        "• Шахтёров кучно, в одну точку — со стороны заморозки\n\n"
+        "*🔵 Шаг 3: Выход с игры*\n"
+        "Скинул всё войско → закрой игру полностью!\n"
+        "Зайди снова — атака уже засчитана, включая % урона!\n"
+        "⏱ Экономия времени!\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "*🧠 Результат:*\n"
+        "6 атак (5 обычных + 1 бонусная за 100%) = ~25к золота столицы 🏆"
+    ),
+    "video": None,
+}
+
+GUIDE_EQUIP = {
+    "title": "🎒 Снаряжение",
+    "text": "🔜 *Гайд по снаряжению скоро будет добавлен!*\n\nСледи за обновлениями.",
+    "video": None,
+}
+
+GUIDE_HEROES = {
+    "title": "🦸 Герои",
+    "text": "🔜 *Гайд по героям скоро будет добавлен!*\n\nСледи за обновлениями.",
+    "video": None,
+}
+
 # ══════════════════════════════════════════════════════════════
 # GROUP HANDLER — redirect to DM
 # ══════════════════════════════════════════════════════════════
@@ -947,11 +1055,118 @@ async def language_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     lang = query.data.replace("lang_","")
     context.user_data["lang"] = lang
-    row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10,14)]
-    row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14,18)]
-    row3 = [InlineKeyboardButton("TH18",   callback_data="th_18")]
-    await query.edit_message_text(t(lang,"q_th"), reply_markup=InlineKeyboardMarkup([row1,row2,row3]))
-    return TH_LEVEL
+    keyboard = [[
+        InlineKeyboardButton(t(lang,"cat_bases"),  callback_data="cat_bases"),
+        InlineKeyboardButton(t(lang,"cat_guides"), callback_data="cat_guides"),
+    ]]
+    await query.edit_message_text(
+        f"✅ Language set!\n\n{t(lang,'q_category')}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return CATEGORY
+
+
+async def category_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang     = context.user_data.get("lang","en")
+    category = query.data  # "cat_bases" or "cat_guides"
+
+    if category == "cat_bases":
+        # Go to TH selection
+        row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10,14)]
+        row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14,18)]
+        row3 = [InlineKeyboardButton("TH18",   callback_data="th_18")]
+        await query.edit_message_text(t(lang,"q_th"), reply_markup=InlineKeyboardMarkup([row1,row2,row3]))
+        return TH_LEVEL
+
+    else:
+        # Go to guide topic selection
+        keyboard = [[
+            InlineKeyboardButton(t(lang,"guide_attack"), callback_data="guide_attack"),
+            InlineKeyboardButton(t(lang,"guide_bh"),     callback_data="guide_bh"),
+        ],[
+            InlineKeyboardButton(t(lang,"guide_equip"),  callback_data="guide_equip"),
+            InlineKeyboardButton(t(lang,"guide_heroes"), callback_data="guide_heroes"),
+        ]]
+        await query.edit_message_text(
+            t(lang,"q_guide_topic"),
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return GUIDE_TOPIC
+
+async def guide_topic_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User chose a guide topic."""
+    query = update.callback_query
+    await query.answer()
+    lang  = context.user_data.get("lang","en")
+    topic = query.data  # guide_attack, guide_bh, guide_equip, guide_heroes
+
+    if topic == "guide_attack":
+        # Show TH level selection for attack guides
+        keyboard = [[
+            InlineKeyboardButton("TH12", callback_data="atk_12"),
+            InlineKeyboardButton("TH13", callback_data="atk_13"),
+            InlineKeyboardButton("TH14", callback_data="atk_14"),
+        ],[
+            InlineKeyboardButton("TH15", callback_data="atk_15"),
+            InlineKeyboardButton("TH16", callback_data="atk_16"),
+        ]]
+        await query.edit_message_text(
+            f"{t(lang,'guide_attack')}\n\n{t(lang,'q_th')}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return GUIDE_ATTACK_TH
+
+    elif topic == "guide_bh":
+        await send_guide(query, lang, GUIDE_BH)
+        return ConversationHandler.END
+
+    elif topic == "guide_equip":
+        await send_guide(query, lang, GUIDE_EQUIP)
+        return ConversationHandler.END
+
+    elif topic == "guide_heroes":
+        await send_guide(query, lang, GUIDE_HEROES)
+        return ConversationHandler.END
+
+    return ConversationHandler.END
+
+
+async def guide_attack_th_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User chose TH level for attack guide."""
+    query = update.callback_query
+    await query.answer()
+    lang    = context.user_data.get("lang","en")
+    th_num  = int(query.data.replace("atk_",""))
+    guide   = GUIDE_ATTACK.get(th_num)
+    if guide:
+        await send_guide(query, lang, guide)
+    else:
+        await query.edit_message_text("Guide not available yet. Check back soon!")
+    return ConversationHandler.END
+
+
+async def send_guide(query, lang: str, guide: dict):
+    """Send a guide card with title, text and optional video button."""
+    title = guide.get("title","")
+    text  = guide.get("text","")
+    video = guide.get("video")
+
+    msg = f"*{title}*\n\n{text}"
+
+    keyboard_rows = []
+    if video:
+        keyboard_rows.append([
+            InlineKeyboardButton("▶️ Смотреть видео", url=video)
+        ])
+    keyboard_rows.append([
+        InlineKeyboardButton("⬅️ Главное меню", callback_data="back_to_main")
+    ])
+    markup = InlineKeyboardMarkup(keyboard_rows)
+
+    await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=markup)
+
 
 async def th_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1186,6 +1401,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def back_to_main_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle back to main menu button."""
+    query = update.callback_query
+    await query.answer()
+    lang = context.user_data.get("lang","en")
+    keyboard = [[
+        InlineKeyboardButton(t(lang,"cat_bases"),  callback_data="cat_bases"),
+        InlineKeyboardButton(t(lang,"cat_guides"), callback_data="cat_guides"),
+    ]]
+    await query.edit_message_text(
+        t(lang,"q_category"),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /language command — show language picker."""
     keyboard = [[
@@ -1277,12 +1507,12 @@ async def post_init(app):
     """Set bot commands menu shown in Telegram UI."""
     from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
     private_cmds = [
-        BotCommand("start",    "🏰 Find a base"),
+        BotCommand("start",    "🏰 Bases & Guides"),
         BotCommand("language", "🌍 Change language"),
         BotCommand("help",     "❓ How to use"),
     ]
     group_cmds = [
-        BotCommand("start",    "🏰 Find a base (results in DM)"),
+        BotCommand("start",    "🏰 Bases & Guides (DM)"),
         BotCommand("help",     "❓ How to use"),
     ]
     await app.bot.set_my_commands(private_cmds, scope=BotCommandScopeAllPrivateChats())
@@ -1298,9 +1528,12 @@ def main():
         entry_points=[CommandHandler("start",    group_start),
                       CommandHandler("language", language_cmd)],
         states={
-            LANG:     [CallbackQueryHandler(language_chosen, pattern="^lang_")],
-            TH_LEVEL: [CallbackQueryHandler(th_chosen,       pattern="^th_")],
-            PURPOSE:  [CallbackQueryHandler(purpose_chosen,  pattern="^purpose_")],
+            LANG:            [CallbackQueryHandler(language_chosen,        pattern="^lang_")],
+            CATEGORY:        [CallbackQueryHandler(category_chosen,        pattern="^cat_")],
+            TH_LEVEL:        [CallbackQueryHandler(th_chosen,              pattern="^th_")],
+            PURPOSE:         [CallbackQueryHandler(purpose_chosen,         pattern="^purpose_")],
+            GUIDE_TOPIC:     [CallbackQueryHandler(guide_topic_chosen,     pattern="^guide_")],
+            GUIDE_ATTACK_TH: [CallbackQueryHandler(guide_attack_th_chosen, pattern="^atk_")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -1308,10 +1541,11 @@ def main():
     app.add_handler(CommandHandler("help",     help_cmd))
     app.add_handler(CommandHandler("language", language_cmd))
     app.add_handler(CommandHandler("admin",    admin_panel))
-    app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^fb_"))
-    app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^rp_"))
-    app.add_handler(CallbackQueryHandler(deep_handler,     pattern="^deep_"))
-    logger.info("dlce BASE bot v6.3 starting...")
+    app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^fb_"))
+    app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
+    app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
+    app.add_handler(CallbackQueryHandler(back_to_main_handler,pattern="^back_to_main"))
+    logger.info("dlce BASE bot v7.0 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
