@@ -1,4 +1,4 @@
-# dlce BASE bot v7.1
+# dlce BASE bot v7.2
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -79,7 +79,7 @@ T = {
         "q_guide_topic":  "📖 Choose a topic:",
         "guide_attack":   "⚔️ Attack Guide",
         "guide_equip":    "🎒 Equipment",
-        "guide_heroes":   "🦸 Heroes",
+        "guide_web":      "🌐 Web Services",
         "guide_bh":       "🔨 Builder Hall",
         "guide_q_th":     "⚔️ Choose TH level for attack guide:",
         "watch_video":    "▶️ Watch Video",
@@ -131,7 +131,7 @@ T = {
         "q_guide_topic":  "📖 Выбери тему:",
         "guide_attack":   "⚔️ Гайд по атаке",
         "guide_equip":    "🎒 Снаряжение",
-        "guide_heroes":   "🦸 Герои",
+        "guide_web":      "🌐 Веб-сервисы",
         "guide_bh":       "🔨 Билдер Холл",
         "guide_q_th":     "⚔️ Выбери ТХ для гайда по атаке:",
         "watch_video":    "▶️ Смотреть видео",
@@ -183,7 +183,7 @@ T = {
         "q_guide_topic":  "📖 בחר נושא:",
         "guide_attack":   "⚔️ מדריך התקפה",
         "guide_equip":    "🎒 ציוד",
-        "guide_heroes":   "🦸 גיבורים",
+        "guide_web":      "🌐 שירותי אינטרנט",
         "guide_bh":       "🔨 Builder Hall",
         "guide_q_th":     "⚔️ בחר רמת TH למדריך:",
         "watch_video":    "▶️ צפה בסרטון",
@@ -734,8 +734,9 @@ async def db_track_usage(user_id: int, username: str, th: int, purpose: str):
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin-only command — shows usage stats, feedback table, bad bases."""
     user_id = update.effective_user.id
+    logger.info(f"Admin command from user_id={user_id}, ADMIN_ID={ADMIN_ID}")
     if ADMIN_ID and user_id != ADMIN_ID:
-        await update.message.reply_text("Access denied.")
+        await update.message.reply_text(f"Access denied. Your ID: {user_id}")
         return
 
     from collections import Counter
@@ -937,109 +938,421 @@ async def send_card(bot, chat_id, base, lang, label, link_key, context, is_recom
 
 
 # ══════════════════════════════════════════════════════════════
-# GUIDE CONTENT
+# GUIDE CONTENT — multilingual
 # ══════════════════════════════════════════════════════════════
 
+# Attack guides per TH — text in all 3 languages
 GUIDE_ATTACK = {
     12: {
-        "title": "⚔️ Атака Ратуши 12",
-        "text": (
-            "Первое видео для Ратуши 12 уровня!\n\n"
-            "Буду рад вашим советам и просьбам к следующим видео.\n"
-            "П.с. Это закончил резко — чтоб не тратить время.\n"
-            "В след раз буду по повторам показывать а не «онлайн» 😂"
-        ),
+        "title": {"ru":"⚔️ Атака ТХ12","en":"⚔️ Attack TH12","he":"⚔️ התקפה TH12"},
+        "text": {
+            "ru": (
+                "🎥 *Первое видео для Ратуши 12!*\n\n"
+                "Буду рад вашим советам и просьбам к следующим видео 😊\n\n"
+                "_П.с. Закончил резко — чтоб не тратить время.\n"
+                "В след раз буду по повторам показывать, а не в реальном времени 😂_"
+            ),
+            "en": (
+                "🎥 *First video for Town Hall 12!*\n\n"
+                "Would love your feedback and requests for future videos 😊\n\n"
+                "_Note: ended abruptly to save time.\n"
+                "Next time I\'ll use replays instead of live 😂_"
+            ),
+            "he": (
+                "🎥 *הסרטון הראשון לאולם עיירה 12!*\n\n"
+                "אשמח לקבל הצעות ובקשות לסרטונים הבאים 😊\n\n"
+                "_הערה: סיימתי בפתאומיות כדי לחסוך זמן 😂_"
+            ),
+        },
         "video": "https://youtu.be/pvISNy7Vt4U?si=bxdxgZRVjeIEaD1G",
     },
     13: {
-        "title": "⚔️ Атака Ратуши 13",
-        "text": (
-            "*Тактика: Драконы + Дирижабль*\n\n"
-            "1️⃣ Находим сторону с Орлиной Артиллерией.\n"
-            "С одного бока — Королева (сразу способность), с другого — Принц (сразу способность)\n\n"
-            "2️⃣ Между ними выпускаем войско: шары → драконы → хранитель → чемпионка.\n"
-            "Ждём пару сек → Дирижабль (летит к Ратуше)\n\n"
-            "3️⃣ Используем способность Хранителя (спасаем Дирижабль)\n\n"
-            "4️⃣ По бокам от ратуши кидаем 2 зелья Тотема (примут урон → Дирик доедет)\n\n"
-            "5️⃣ Дирижабль у ратуши → зелье Клонов → выпускаем Ети → Ярость на него\n\n"
-            "6️⃣ 6 морозов для контроля: Адские башни и ПВО"
-        ),
+        "title": {"ru":"⚔️ Атака ТХ13","en":"⚔️ Attack TH13","he":"⚔️ התקפה TH13"},
+        "text": {
+            "ru": (
+                "🐉 *Тактика: Драконы + Дирижабль*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *Найди Орлиную Артиллерию*\n"
+                "└ Королева с одного бока (сразу способность)\n"
+                "└ Принц с другого (сразу способность)\n\n"
+                "2️⃣ *Выпусти войско между ними:*\n"
+                "└ Шары → Драконы → Хранитель → Чемпионка\n"
+                "└ Через пару сек → 🚀 Дирижабль к ратуше\n\n"
+                "3️⃣ *Способность Хранителя* — спасаем Дирижабль\n\n"
+                "4️⃣ *2 зелья Тотема* по бокам от ратуши — принимают урон\n\n"
+                "5️⃣ *Дирижабль у ратуши:*\n"
+                "└ Зелье Клонов → выпускаем Ети → Ярость на него\n\n"
+                "6️⃣ *6 морозов* для контроля — Адские башни + ПВО\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            "en": (
+                "🐉 *Tactic: Dragons + Airship*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *Find the Eagle Artillery*\n"
+                "└ Queen on one side (activate ability immediately)\n"
+                "└ Prince on the other side (activate immediately)\n\n"
+                "2️⃣ *Deploy troops between them:*\n"
+                "└ Balloons → Dragons → Warden → Champion\n"
+                "└ After a few secs → 🚀 Airship toward TH\n\n"
+                "3️⃣ *Warden\'s ability* — protect the Airship\n\n"
+                "4️⃣ *2 Totem potions* next to TH — absorb damage\n\n"
+                "5️⃣ *Airship at TH:*\n"
+                "└ Clone spell → deploy Yeti → Rage on Airship\n\n"
+                "6️⃣ *6 Freeze spells* — control Infernos + Air Defenses\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            "he": (
+                "🐉 *טקטיקה: דרקונים + ספינה*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *מצא את ארטילריית הנשר*\n"
+                "└ המלכה מצד אחד (הפעל יכולת מיד)\n"
+                "└ הנסיך מהצד השני (הפעל מיד)\n\n"
+                "2️⃣ *שלח חיילים ביניהם:*\n"
+                "└ בלונים → דרקונים → שומר → אלופה\n"
+                "└ אחרי כמה שניות → 🚀 ספינה לכיוון TH\n\n"
+                "3️⃣ *יכולת השומר* — מגן על הספינה\n\n"
+                "4️⃣ *2 כדורי טוטם* ליד ה-TH — סופגים נזק\n\n"
+                "5️⃣ *ספינה ב-TH:*\n"
+                "└ לחש שכפול → שלח ייטי → זעם על הספינה\n\n"
+                "6️⃣ *6 הקפאות* — שלוט על מגדלי גיהנום + הגנ\'א\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+        },
         "video": "https://youtu.be/biH2TBQbPOM?si=1ACDVLUeA-vYvrhJ",
     },
     14: {
-        "title": "⚔️ Атака Ратуши 14",
-        "text": (
-            "*Тактика: Драконы + Дирижабль (улучшенная)*\n\n"
-            "1️⃣ Находим Орлиную Артиллерию.\n"
-            "С одного бока — Королева (сразу способность), с другого — Принц (сразу способность)\n\n"
-            "2️⃣ Войско: шары → наездники на драконах → драконы → хранитель → чемпионка.\n"
-            "Ждём → Дирижабль\n\n"
-            "3️⃣ Способность Хранителя для защиты Дирижабля\n\n"
-            "4️⃣ По бокам от ратуши: 1 тотем + 1 фриз (или 2 тотема)\n\n"
-            "5️⃣ Дирижабль у ратуши → *2 зелья Клонов 7 уровня* (38 мест!) → Супер-Ети → Ярость\n\n"
-            "6️⃣ 3 мороза: Адские башни + ПВО\n\n"
-            "⚠️ Важно: Зелья Клонов должны быть *7 уровня*!"
-        ),
+        "title": {"ru":"⚔️ Атака ТХ14","en":"⚔️ Attack TH14","he":"⚔️ התקפה TH14"},
+        "text": {
+            "ru": (
+                "🐉 *Тактика: Драконы + Дирижабль (улучшенная)*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *Найди Орлиную Артиллерию*\n"
+                "└ Королева с одного бока (сразу способность)\n"
+                "└ Принц с другого (сразу способность)\n\n"
+                "2️⃣ *Порядок войска:*\n"
+                "└ Шары → Наездники на Драконах → Драконы → Хранитель → Чемпионка\n"
+                "└ Через пару сек → 🚀 Дирижабль\n\n"
+                "3️⃣ *Способность Хранителя* — защищаем Дирижабль\n\n"
+                "4️⃣ *Контроль у ратуши:*\n"
+                "└ 1 тотем + 1 фриз (или 2 тотема)\n\n"
+                "5️⃣ *Дирижабль у ратуши:*\n"
+                "└ 2 зелья Клонов *7 уровня* (38 мест!) → Супер-Ети → Ярость\n\n"
+                "6️⃣ *3 мороза* — Адские башни + ПВО\n\n"
+                "⚠️ *Важно:* Зелья Клонов должны быть *7 уровня!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            "en": (
+                "🐉 *Tactic: Dragons + Airship (upgraded)*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *Find the Eagle Artillery*\n"
+                "└ Queen on one side (activate immediately)\n"
+                "└ Prince on the other (activate immediately)\n\n"
+                "2️⃣ *Troop order:*\n"
+                "└ Balloons → Dragon Riders → Dragons → Warden → Champion\n"
+                "└ After a few secs → 🚀 Airship\n\n"
+                "3️⃣ *Warden ability* — protect the Airship\n\n"
+                "4️⃣ *Control near TH:*\n"
+                "└ 1 totem + 1 freeze (or 2 totems)\n\n"
+                "5️⃣ *Airship at TH:*\n"
+                "└ 2 Clone spells *level 7* (38 slots!) → Super Yeti → Rage\n\n"
+                "6️⃣ *3 Freeze spells* — Infernos + Air Defense\n\n"
+                "⚠️ *Important:* Clone spells must be *level 7!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            "he": (
+                "🐉 *טקטיקה: דרקונים + ספינה (משופרת)*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *מצא ארטילריית נשר*\n"
+                "└ מלכה מצד אחד (הפעל מיד)\n"
+                "└ נסיך מהצד השני (הפעל מיד)\n\n"
+                "2️⃣ *סדר חיילים:*\n"
+                "└ בלונים → רוכבי דרקון → דרקונים → שומר → אלופה\n"
+                "└ אחרי כמה שניות → 🚀 ספינה\n\n"
+                "3️⃣ *יכולת שומר* — מגן על הספינה\n\n"
+                "4️⃣ *שליטה ליד TH:*\n"
+                "└ טוטם 1 + הקפאה 1 (או 2 טוטמים)\n\n"
+                "5️⃣ *ספינה ב-TH:*\n"
+                "└ 2 לחשי שכפול *רמה 7* (38 מקומות!) → סופר ייטי → זעם\n\n"
+                "6️⃣ *3 הקפאות* — מגדלי גיהנום + הגנ\'א\n\n"
+                "⚠️ *חשוב:* לחשי שכפול חייבים להיות *רמה 7!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+        },
         "video": "https://youtu.be/Wye_Dr_4sb8?si=I2vEqgA5AFV-iJSp",
     },
     15: {
-        "title": "⚔️ Атака Ратуши 15",
-        "text": (
-            "*Тактика: Смешанная армия*\n\n"
-            "1️⃣ Находим Орлиную Артиллерию → кидаем Чемпионку ближе к ней.\n"
-            "Делаем проходку под зельем невидимости — забираем ОА или чистим путь.\n"
-            "Забираем Чемпионку зельем возврата.\n\n"
-            "2️⃣ Всё войско (кроме Королевы и мух) — левее проходки.\n"
-            "Там же метатель войск + Король + Чемпионка\n\n"
-            "3️⃣ Королеву кидаем в конец той стороны где напали — подчистит край, войско не разбежится!\n\n"
-            "4️⃣ 3 морозных зелья для контроля ситуации\n\n"
-            "⚠️ Главное: войско должно оставаться *кучно*!"
-        ),
+        "title": {"ru":"⚔️ Атака ТХ15","en":"⚔️ Attack TH15","he":"⚔️ התקפה TH15"},
+        "text": {
+            "ru": (
+                "🪖 *Тактика: Смешанная армия*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *Чемпионка делает проходку:*\n"
+                "└ Кидаем к Орлиной Артиллерии\n"
+                "└ Атакуем под зельем невидимости — забираем ОА или чистим путь\n"
+                "└ Забираем Чемпионку зельем возврата\n\n"
+                "2️⃣ *Основное войско:*\n"
+                "└ Всё (кроме Королевы и мух) — левее проходки\n"
+                "└ Там же: метатель войск + Король + Чемпионка\n\n"
+                "3️⃣ *Королева в конец стороны атаки*\n"
+                "└ Подчистит край → войско не разбежится!\n\n"
+                "4️⃣ *3 морозных зелья* для контроля ситуации\n\n"
+                "⚠️ *Главное:* войско должно оставаться *кучно!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            "en": (
+                "🪖 *Tactic: Mixed Army*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *Champion funnel:*\n"
+                "└ Deploy near Eagle Artillery\n"
+                "└ Attack under Invisibility Potion — take out EA or clear path\n"
+                "└ Recall Champion with Return Potion\n\n"
+                "2️⃣ *Main army:*\n"
+                "└ Everything (except Queen and minions) — left of the funnel\n"
+                "└ Also: Clan Castle, King, Champion\n\n"
+                "3️⃣ *Queen at the end of the attack side*\n"
+                "└ Cleans up the edge → troops stay together!\n\n"
+                "4️⃣ *3 Freeze spells* to control the battle\n\n"
+                "⚠️ *Key:* Keep your troops *grouped together!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            "he": (
+                "🪖 *טקטיקה: צבא מעורב*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "1️⃣ *האלופה פותחת מסלול:*\n"
+                "└ שלח ליד ארטילריית הנשר\n"
+                "└ תקוף תחת קסם אלמוניות — השמד EA או נקה מסלול\n"
+                "└ החזר האלופה עם כדור החזרה\n\n"
+                "2️⃣ *צבא ראשי:*\n"
+                "└ הכל (חוץ ממלכה ומזבובים) — שמאל למסלול\n"
+                "└ גם: טירה קבוצתית, מלך, אלופה\n\n"
+                "3️⃣ *מלכה בקצה צד ההתקפה*\n"
+                "└ מנקה את הקצה → החיילים נשארים יחד!\n\n"
+                "4️⃣ *3 הקפאות* לשליטה בקרב\n\n"
+                "⚠️ *מפתח:* שמור החיילים *יחד!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+        },
         "video": "https://youtu.be/nQr_qbCzdJ0?si=yB11d3Y8fQoOfAjy",
     },
     16: {
-        "title": "⚔️ Атака Ратуши 16",
-        "text": (
-            "🔜 *Гайд по ТХ16 скоро будет добавлен!*\n\n"
-            "Следи за обновлениями бота."
-        ),
+        "title": {"ru":"⚔️ Атака ТХ16","en":"⚔️ Attack TH16","he":"⚔️ התקפה TH16"},
+        "text": {
+            "ru": "🔜 *Гайд по ТХ16 скоро будет добавлен!*\n\nСледи за обновлениями бота.",
+            "en": "🔜 *TH16 attack guide coming soon!*\n\nStay tuned for updates.",
+            "he": "🔜 *מדריך התקפה TH16 בקרוב!*\n\nהישאר מעודכן.",
+        },
         "video": None,
     },
 }
 
 GUIDE_BH = {
-    "title": "🔨 Builder Hall — Фарм золота столицы",
-    "text": (
-        "*⚔️ Как фармить 22,000+ золота столицы за рейд*\n\n"
-        "Если ты получаешь 6–8к за атаку — ты делаешь это неправильно!\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "*🟠 Шаг 1: Нужен клан 10 уровня*\n"
-        "Наш клан dlce уже 10 уровень 💪\n"
-        "Войско: *10 шахтёров* + 1 мороз + 2 зелья скелетиков\n\n"
-        "*🟣 Шаг 2: Атакуй любую деревню*\n"
-        "• Заморозку на башни по группе: арбалет, ракетницы, Инферно, маги, теслы\n"
-        "• 2 зелья скелетов — в края или скопление деффа\n"
-        "• Шахтёров кучно, в одну точку — со стороны заморозки\n\n"
-        "*🔵 Шаг 3: Выход с игры*\n"
-        "Скинул всё войско → закрой игру полностью!\n"
-        "Зайди снова — атака уже засчитана, включая % урона!\n"
-        "⏱ Экономия времени!\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "*🧠 Результат:*\n"
-        "6 атак (5 обычных + 1 бонусная за 100%) = ~25к золота столицы 🏆"
-    ),
+    "title": {
+        "ru": "🔨 Builder Hall — Фарм золота столицы",
+        "en": "🔨 Builder Hall — Capital Gold Farming",
+        "he": "🔨 Builder Hall — פארמינג זהב הבירה",
+    },
+    "text": {
+        "ru": (
+            "💰 *Как фармить 22,000+ золота столицы за рейд*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❌ Получаешь 6–8к за атаку? Ты делаешь это неправильно!\n\n"
+            "🟠 *Шаг 1 — Клан 10 уровня*\n"
+            "└ Наш клан dlce уже *10 уровень* 💪\n"
+            "└ Войско: *10 шахтёров* + 1 заморозка + 2 скелетика\n\n"
+            "🟣 *Шаг 2 — Атака*\n"
+            "└ 🧊 Заморозку на арбалет, ракетницы, Инферно, магов, теслы\n"
+            "└ 💀 2 зелья скелетов — в края или скопление деффа\n"
+            "└ ⛏ Шахтёров *кучно* в одну точку со стороны заморозки\n\n"
+            "🔵 *Шаг 3 — Лайфхак с выходом*\n"
+            "└ Скинул всё войско → *полностью закрой игру*\n"
+            "└ Зайди снова — атака уже засчитана с % урона!\n"
+            "└ ⏱ Огромная экономия времени!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏆 *Результат:* 6 атак (5 + 1 бонусная) = ~25к золота столицы"
+        ),
+        "en": (
+            "💰 *How to farm 22,000+ Capital Gold per raid*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❌ Getting 6–8k per attack? You\'re doing it wrong!\n\n"
+            "🟠 *Step 1 — Level 10 Clan needed*\n"
+            "└ Our clan dlce is already *level 10* 💪\n"
+            "└ Army: *10 Miners* + 1 Freeze + 2 Skeleton spells\n\n"
+            "🟣 *Step 2 — Attack*\n"
+            "└ 🧊 Freeze on: Scattershot, Rocket Artillery, Inferno, Wizards, Teslas\n"
+            "└ 💀 2 Skeleton spells on edges or defense clusters\n"
+            "└ ⛏ Drop Miners *together* in one spot on the freeze side\n\n"
+            "🔵 *Step 3 — Time-saver trick*\n"
+            "└ Deploy all troops → *fully close the game*\n"
+            "└ Re-open — attack already counted including % damage!\n"
+            "└ ⏱ Massive time saver!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏆 *Result:* 6 attacks (5 + 1 bonus) = ~25k Capital Gold"
+        ),
+        "he": (
+            "💰 *איך לפארם 22,000+ זהב בירה לפשיטה*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❌ מקבל 6-8k להתקפה? אתה עושה את זה לא נכון!\n\n"
+            "🟠 *שלב 1 — קבוצה רמה 10*\n"
+            "└ הקבוצה שלנו dlce כבר *רמה 10* 💪\n"
+            "└ צבא: *10 כורים* + 1 הקפאה + 2 שלדים\n\n"
+            "🟣 *שלב 2 — תקיפה*\n"
+            "└ 🧊 הקפאה על: קשת, רקטות, אינפרנו, קוסמים, טסלות\n"
+            "└ 💀 2 לחשי שלד בקצוות או על ריכוזי הגנה\n"
+            "└ ⛏ שלח כורים *ביחד* לנקודה אחת מצד ההקפאה\n\n"
+            "🔵 *שלב 3 — טריק חיסכון בזמן*\n"
+            "└ שחרר כל החיילים → *סגור את המשחק לגמרי*\n"
+            "└ פתח שוב — ההתקפה כבר נספרת כולל % נזק!\n"
+            "└ ⏱ חיסכון עצום בזמן!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🏆 *תוצאה:* 6 התקפות (5 + 1 בונוס) = ~25k זהב בירה"
+        ),
+    },
     "video": None,
 }
 
 GUIDE_EQUIP = {
-    "title": "🎒 Снаряжение",
-    "text": "🔜 *Гайд по снаряжению скоро будет добавлен!*\n\nСледи за обновлениями.",
+    "title": {
+        "ru": "🎒 Снаряжение — Навигация",
+        "en": "🎒 Equipment — Navigation",
+        "he": "🎒 ציוד — ניווט",
+    },
+    "text": {
+        "ru": (
+            "🎒 *Снаряжение — Навигация*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚙️ *Руда*\n"
+            "└ [Подсчёт](https://t.me/ON_Images/44/115) — Сколько руды с основных источников?\n"
+            "└ [Таблица](https://t.me/ON_Images/44/114) — Руда со звёздного бонуса\n"
+            "└ [Таблица](https://t.me/ON_Images/44/55) — Руда на КВ\n"
+            "└ [Таблица](https://t.me/ON_Images/44/59) — Руда для прокачки снаряжения\n\n"
+            "🛠️ *Разборы снаряжений*\n"
+            "└ [Кукла-лавашар](https://t.me/ON_Images/44/51) — эффективность?\n"
+            "└ [Электросапоги](https://t.me/ON_Images/44/46) — эффективность?\n"
+            "└ [Змеиный браслет](https://t.me/ON_Images/44/47) — эффективность?\n"
+            "└ [Солдатик](https://t.me/ON_Images/44/48) — эффективность?\n"
+            "└ [Тёмная корона](https://t.me/ON_Images/44/50) — эффективность?\n"
+            "└ [Факел героев](https://t.me/ON_Images/44/80) — эффективность?\n"
+            "└ [Метеоритный посох](https://t.me/ON_Images/44/109) — эффективность?\n"
+            "└ [Снежинка](https://t.me/ON_Images/44/141) — эффективность?\n\n"
+            "☄️ *Другое*\n"
+            "└ [Огненный шар](https://t.me/ON_Images/44/81) — радиус взрыва 2х2/3х3/4х4\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+        "en": (
+            "🎒 *Equipment — Navigation*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚙️ *Ore*\n"
+            "└ [Calculator](https://t.me/ON_Images/44/115) — How much ore from main sources?\n"
+            "└ [Table](https://t.me/ON_Images/44/114) — Ore from Star Bonus\n"
+            "└ [Table](https://t.me/ON_Images/44/55) — Ore from Clan Wars\n"
+            "└ [Table](https://t.me/ON_Images/44/59) — Ore needed to upgrade equipment\n\n"
+            "🛠️ *Equipment Reviews*\n"
+            "└ [Lava Launcher](https://t.me/ON_Images/44/51) — how effective?\n"
+            "└ [Giant Gauntlet](https://t.me/ON_Images/44/46) — how effective?\n"
+            "└ [Snake Bracelet](https://t.me/ON_Images/44/47) — how effective?\n"
+            "└ [Hog Rider Puppet](https://t.me/ON_Images/44/48) — how effective?\n"
+            "└ [Dark Crown](https://t.me/ON_Images/44/50) — how effective?\n"
+            "└ [Hero Torch](https://t.me/ON_Images/44/80) — how effective?\n"
+            "└ [Meteor Staff](https://t.me/ON_Images/44/109) — how effective?\n"
+            "└ [Snowflake](https://t.me/ON_Images/44/141) — how effective?\n\n"
+            "☄️ *Other*\n"
+            "└ [Fireball](https://t.me/ON_Images/44/81) — blast radius 2x2/3x3/4x4\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+        "he": (
+            "🎒 *ציוד — ניווט*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚙️ *עפרה*\n"
+            "└ [חישוב](https://t.me/ON_Images/44/115) — כמה עפרה ממקורות עיקריים?\n"
+            "└ [טבלה](https://t.me/ON_Images/44/114) — עפרה מבונוס כוכבים\n"
+            "└ [טבלה](https://t.me/ON_Images/44/55) — עפרה ממלחמות קבוצה\n"
+            "└ [טבלה](https://t.me/ON_Images/44/59) — עפרה לשדרוג ציוד\n\n"
+            "🛠️ *סקירות ציוד*\n"
+            "└ [כדור לבה](https://t.me/ON_Images/44/51) — כמה אפקטיבי?\n"
+            "└ [כפפת ענק](https://t.me/ON_Images/44/46) — כמה אפקטיבי?\n"
+            "└ [צמיד נחש](https://t.me/ON_Images/44/47) — כמה אפקטיבי?\n"
+            "└ [בובת חזיר](https://t.me/ON_Images/44/48) — כמה אפקטיבי?\n"
+            "└ [כתר אפל](https://t.me/ON_Images/44/50) — כמה אפקטיבי?\n"
+            "└ [לפיד גיבור](https://t.me/ON_Images/44/80) — כמה אפקטיבי?\n"
+            "└ [מטאור](https://t.me/ON_Images/44/109) — כמה אפקטיבי?\n"
+            "└ [פתית שלג](https://t.me/ON_Images/44/141) — כמה אפקטיבי?\n\n"
+            "☄️ *אחר*\n"
+            "└ [כדור אש](https://t.me/ON_Images/44/81) — רדיוס פיצוץ 2x2/3x3/4x4\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+    },
     "video": None,
 }
 
-GUIDE_HEROES = {
-    "title": "🦸 Герои",
-    "text": "🔜 *Гайд по героям скоро будет добавлен!*\n\nСледи за обновлениями.",
+# WEB SERVICES — replaces Heroes
+GUIDE_WEB = {
+    "title": {
+        "ru": "🌐 Веб-сервисы для CoC",
+        "en": "🌐 Web Services for CoC",
+        "he": "🌐 שירותי אינטרנט ל-CoC",
+    },
+    "text": {
+        "ru": (
+            "🌐 *Полезные сервисы для Clash of Clans*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚔️ *Атаки*\n"
+            "└ [FTB](https://t.me/ON_Images/116/119) — Поиск видео атаки по скриншоту базы\n"
+            "└ [War Report](https://t.me/ON_Images/116/120) — Трекер клановых войн\n"
+            "└ [Zap Quaker](https://t.me/ON_Images/116/121) — Калькулятор заклинаний\n"
+            "└ [Damage Calculator](https://t.me/ON_Images/116/122) — Продвинутый калькулятор урона\n\n"
+            "⬆️ *Прокачка*\n"
+            "└ [Clash Ninja](https://t.me/ON_Images/116/125) — Время до полной прокачки деревни\n"
+            "└ [Clash Tools](https://t.me/ON_Images/116/129) — Простой трекер прокачки\n"
+            "└ [Ore Calculator](https://t.me/ON_Images/116/123) — Калькулятор руды для снаряжения\n\n"
+            "📈 *Статистика*\n"
+            "└ [Clash of Stats](https://t.me/ON_Images/116/127) — Подробная статистика клана/игрока\n"
+            "└ [Clash Spot](https://t.me/ON_Images/116/126) — Индивидуальная и глобальная статистика\n\n"
+            "📢 *Другое*\n"
+            "└ [Clash Fandom](https://t.me/ON_Images/116/124) — Вики по Clash of Clans\n"
+            "└ [Coc Wall Crafter](https://t.me/ON_Images/116/139) — Рисуем базу с ником или логотипом\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+        "en": (
+            "🌐 *Useful Web Services for Clash of Clans*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚔️ *Attacks*\n"
+            "└ [FTB](https://t.me/ON_Images/116/119) — Find attack videos from base screenshots\n"
+            "└ [War Report](https://t.me/ON_Images/116/120) — Clan war tracker\n"
+            "└ [Zap Quaker](https://t.me/ON_Images/116/121) — Spell calculator\n"
+            "└ [Damage Calculator](https://t.me/ON_Images/116/122) — Advanced damage calculator\n\n"
+            "⬆️ *Upgrading*\n"
+            "└ [Clash Ninja](https://t.me/ON_Images/116/125) — Time to max your village\n"
+            "└ [Clash Tools](https://t.me/ON_Images/116/129) — Simple upgrade tracker\n"
+            "└ [Ore Calculator](https://t.me/ON_Images/116/123) — Ore calculator for equipment\n\n"
+            "📈 *Statistics*\n"
+            "└ [Clash of Stats](https://t.me/ON_Images/116/127) — Detailed clan/player stats\n"
+            "└ [Clash Spot](https://t.me/ON_Images/116/126) — Individual and global stats\n\n"
+            "📢 *Other*\n"
+            "└ [Clash Fandom](https://t.me/ON_Images/116/124) — Clash of Clans wiki\n"
+            "└ [Coc Wall Crafter](https://t.me/ON_Images/116/139) — Draw your base with clan name/logo\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+        "he": (
+            "🌐 *שירותי אינטרנט שימושיים ל-CoC*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚔️ *התקפות*\n"
+            "└ [FTB](https://t.me/ON_Images/116/119) — מציאת סרטוני התקפה מתמונות בסיס\n"
+            "└ [War Report](https://t.me/ON_Images/116/120) — מעקב מלחמות קבוצה\n"
+            "└ [Zap Quaker](https://t.me/ON_Images/116/121) — מחשבון לחשים\n"
+            "└ [Damage Calculator](https://t.me/ON_Images/116/122) — מחשבון נזק מתקדם\n\n"
+            "⬆️ *שדרוג*\n"
+            "└ [Clash Ninja](https://t.me/ON_Images/116/125) — זמן למקסם הכפר\n"
+            "└ [Clash Tools](https://t.me/ON_Images/116/129) — מעקב שדרוגים פשוט\n"
+            "└ [Ore Calculator](https://t.me/ON_Images/116/123) — מחשבון עפרה לציוד\n\n"
+            "📈 *סטטיסטיקות*\n"
+            "└ [Clash of Stats](https://t.me/ON_Images/116/127) — סטטיסטיקות מפורטות\n"
+            "└ [Clash Spot](https://t.me/ON_Images/116/126) — סטטיסטיקות אישיות וגלובליות\n\n"
+            "📢 *אחר*\n"
+            "└ [Clash Fandom](https://t.me/ON_Images/116/124) — ויקי Clash of Clans\n"
+            "└ [Coc Wall Crafter](https://t.me/ON_Images/116/139) — ציור בסיס עם שם/לוגו\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+    },
     "video": None,
 }
 
@@ -1118,7 +1431,7 @@ async def category_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton(t(lang,"guide_bh"),     callback_data="guide_bh"),
         ],[
             InlineKeyboardButton(t(lang,"guide_equip"),  callback_data="guide_equip"),
-            InlineKeyboardButton(t(lang,"guide_heroes"), callback_data="guide_heroes"),
+            InlineKeyboardButton(t(lang,"guide_web"),    callback_data="guide_web"),
         ]]
         await query.edit_message_text(
             t(lang,"q_guide_topic"),
@@ -1157,8 +1470,8 @@ async def guide_topic_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await send_guide(query, lang, GUIDE_EQUIP)
         return ConversationHandler.END
 
-    elif topic == "guide_heroes":
-        await send_guide(query, lang, GUIDE_HEROES)
+    elif topic == "guide_web":
+        await send_guide(query, lang, GUIDE_WEB)
         return ConversationHandler.END
 
     return ConversationHandler.END
@@ -1180,11 +1493,22 @@ async def guide_attack_th_chosen(update: Update, context: ContextTypes.DEFAULT_T
 
 async def send_guide(query, lang: str, guide: dict):
     """Send a guide card with title, text and optional video button."""
-    title = guide.get("title","")
-    text  = guide.get("text","")
-    video = guide.get("video")
+    # Support both multilingual dicts and plain strings
+    raw_title = guide.get("title","")
+    raw_text  = guide.get("text","")
+    video     = guide.get("video")
 
-    msg = f"*{title}*\n\n{text}"
+    if isinstance(raw_title, dict):
+        title = raw_title.get(lang, raw_title.get("ru", ""))
+    else:
+        title = raw_title
+
+    if isinstance(raw_text, dict):
+        text = raw_text.get(lang, raw_text.get("ru", ""))
+    else:
+        text = raw_text
+
+    msg = f"{text}"  # title already included in text for new guides
 
     keyboard_rows = []
     if video:
@@ -1336,14 +1660,15 @@ async def purpose_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    # Deep Research button
+    # Deep Research + Back to main menu buttons
     dk = f"{th}_{purpose}_{lang}"
     await context.bot.send_message(
         chat_id=send_to,
         text="─"*22,
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton(t(lang,"deep_btn"), callback_data=f"deep_{dk}")
-        ]])
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(t(lang,"deep_btn"),  callback_data=f"deep_{dk}")],
+            [InlineKeyboardButton(t(lang,"back_main"), callback_data="back_to_main")],
+        ])
     )
     return ConversationHandler.END
 
@@ -1433,7 +1758,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def back_to_main_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle back to main menu button."""
+    """Handle back to main menu — sends a fresh message so conversation resets."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("lang","en")
@@ -1441,10 +1766,15 @@ async def back_to_main_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         InlineKeyboardButton(t(lang,"cat_bases"),  callback_data="cat_bases"),
         InlineKeyboardButton(t(lang,"cat_guides"), callback_data="cat_guides"),
     ]]
-    await query.edit_message_text(
-        t(lang,"q_category"),
+    # Send as NEW message so conversation handler picks it up fresh
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=t(lang,"q_category"),
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    # Reset conversation state by clearing user data partially
+    context.user_data.pop("th", None)
+    context.user_data.pop("purpose", None)
 
 
 async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1577,7 +1907,7 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
     app.add_handler(CallbackQueryHandler(back_to_main_handler,pattern="^back_to_main"))
-    logger.info("dlce BASE bot v7.1 starting...")
+    logger.info("dlce BASE bot v7.2 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
