@@ -1,5 +1,5 @@
 --- /mnt/user-data/uploads/bot.py	2026-07-08 22:28:50.549314000 +0000
-+++ bot.py	2026-07-08 22:47:35.603452304 +0000
++++ bot.py	2026-07-08 22:51:23.017202492 +0000
 @@ -1,4 +1,4 @@
 -# dlce BASE bot v7.2
 +# dlce BASE bot v7.3
@@ -34,15 +34,27 @@
          url = (f"https://www.googleapis.com/youtube/v3/search"
                 f"?part=snippet&q={quote_plus(q)}&type=video&maxResults={max_results}"
                 f"&order={order}&key={YOUTUBE_API_KEY}")
-@@ -734,9 +744,19 @@
+@@ -732,13 +742,53 @@
+         logger.warning(f"DB track: {e}")
+ 
  async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     """Admin-only command — shows usage stats, feedback table, bad bases."""
-     user_id = update.effective_user.id
+-    """Admin-only command — shows usage stats, feedback table, bad bases."""
+-    user_id = update.effective_user.id
 -    logger.info(f"Admin command from user_id={user_id}, ADMIN_ID={ADMIN_ID}")
 -    if ADMIN_ID and user_id != ADMIN_ID:
 -        await update.message.reply_text(f"Access denied. Your ID: {user_id}")
-+    logger.info(f"Admin command from user_id={user_id}, ADMIN_IDS={ADMIN_IDS or '(none configured)'}")
++    """Admin-only command — shows usage stats, feedback table, bad bases.
++    SECURITY: never post the actual stats into a group chat, even if the
++    caller is a genuine admin — always DM it instead, same pattern used
++    for base-finder results. Non-admins in a group get no reply at all,
++    so the command's existence isn't advertised to the whole clan."""
++    user_id  = update.effective_user.id
++    is_group = update.effective_chat.type in ("group", "supergroup")
++    logger.info(f"Admin command from user_id={user_id}, ADMIN_IDS={ADMIN_IDS or '(none configured)'}, group={is_group}")
++
 +    if user_id not in ADMIN_IDS:
++        if is_group:
++            return  # stay silent in groups — don't advertise /admin to non-admins
 +        if not ADMIN_IDS:
 +            await update.message.reply_text(
 +                "⚠️ Admin panel isn't configured yet.\n\n"
@@ -54,10 +66,34 @@
 +            )
 +        else:
 +            await update.message.reply_text(f"Access denied. Your Telegram ID: {user_id}")
++        return
++
++    if is_group:
++        # Genuine admin, but triggered from a group — redirect to DM instead
++        # of posting usage stats/usernames where the whole clan can see them.
++        try:
++            await build_and_send_admin_panel(context.bot, user_id)
++            await update.message.reply_text("📩 Admin panel sent to your DM.")
++        except Exception:
++            await update.message.reply_text(
++                "⚠️ Couldn't DM you the admin panel — please open a private "
++                "chat with the bot first (tap its name → Send Message), then "
++                "run /admin again there."
++            )
          return
  
++    await build_and_send_admin_panel(context.bot, update.effective_chat.id)
++
++
++async def build_and_send_admin_panel(bot, chat_id: int):
++    """Builds the admin stats message and sends it to chat_id. Split out from
++    admin_panel() so both the private-chat and group->DM paths share one
++    implementation instead of drifting apart."""
++
      from collections import Counter
-@@ -820,10 +840,10 @@
+     lines = ["🎲 *dlce BASE bot — Admin Panel*", ""]
+ 
+@@ -820,16 +870,16 @@
  
      # ── Bot status (always shown) ─────────────────────────────
      lines.append("🤖 *Bot Status*")
@@ -70,7 +106,14 @@
  
      msg = chr(10).join(lines)
      if len(msg) > 4000:
-@@ -1439,6 +1459,64 @@
+         msg = msg[:3900] + chr(10) + "...(truncated)"
+ 
+-    await update.message.reply_text(msg, parse_mode="Markdown")
++    await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+ 
+ async def db_feedback(link, positive):
+     if not supabase: return
+@@ -1439,6 +1489,64 @@
          )
          return GUIDE_TOPIC
  
@@ -135,7 +178,7 @@
  async def guide_topic_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
      """User chose a guide topic."""
      query = update.callback_query
-@@ -1758,7 +1836,9 @@
+@@ -1758,7 +1866,9 @@
  
  
  async def back_to_main_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146,7 +189,7 @@
      query = update.callback_query
      await query.answer()
      lang = context.user_data.get("lang","en")
-@@ -1775,6 +1855,12 @@
+@@ -1775,6 +1885,12 @@
      # Reset conversation state by clearing user data partially
      context.user_data.pop("th", None)
      context.user_data.pop("purpose", None)
@@ -159,9 +202,16 @@
  
  
  async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-@@ -1868,14 +1954,18 @@
+@@ -1866,29 +1982,73 @@
+ 
+ async def post_init(app):
      """Set bot commands menu shown in Telegram UI."""
-     from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
+-    from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
++    from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
++    # NOTE: "admin" is deliberately left OUT of the shared private_cmds list —
++    # otherwise every user who opens a DM with the bot sees "🔐 Admin panel"
++    # in their command menu. It's registered below, per-chat, only for the
++    # Telegram IDs configured in ADMIN_ID / ADMIN_IDS.
      private_cmds = [
 -        BotCommand("start",    "🎲 Base Finder + Guides"),
 -        BotCommand("language", "🌍 Change language"),
@@ -172,7 +222,6 @@
 +        BotCommand("guides",     "📖 Guides (skip straight to topics)"),
 +        BotCommand("language",   "🌍 Change language"),
 +        BotCommand("help",       "❓ How the bot works"),
-+        BotCommand("admin",      "🔐 Admin panel"),
      ]
      group_cmds = [
 -        BotCommand("start",    "🎲 Base Finder + Guides (results in DM)"),
@@ -184,7 +233,21 @@
      ]
      await app.bot.set_my_commands(private_cmds, scope=BotCommandScopeAllPrivateChats())
      await app.bot.set_my_commands(group_cmds,   scope=BotCommandScopeAllGroupChats())
-@@ -1886,9 +1976,35 @@
+ 
++    admin_cmds = private_cmds + [BotCommand("admin", "🔐 Admin panel")]
++    for admin_id in ADMIN_IDS:
++        try:
++            await app.bot.set_my_commands(admin_cmds, scope=BotCommandScopeChat(chat_id=admin_id))
++        except Exception as e:
++            # Most common cause: this admin has never opened a DM with the
++            # bot yet, so Telegram doesn't have a chat to scope commands to.
++            # /admin still works for them via fallback (unscoped commands
++            # still accept typed text) — this only affects the menu list.
++            logger.warning(f"Could not set admin command menu for {admin_id}: {e}")
++
+ 
+ # ══════════════════════════════════════════════════════════════
+ # MAIN
  # ══════════════════════════════════════════════════════════════
  def main():
      app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
@@ -222,7 +285,7 @@
          states={
              LANG:            [CallbackQueryHandler(language_chosen,        pattern="^lang_")],
              CATEGORY:        [CallbackQueryHandler(category_chosen,        pattern="^cat_")],
-@@ -1897,17 +2013,19 @@
+@@ -1897,17 +2057,19 @@
              GUIDE_TOPIC:     [CallbackQueryHandler(guide_topic_chosen,     pattern="^guide_")],
              GUIDE_ATTACK_TH: [CallbackQueryHandler(guide_attack_th_chosen, pattern="^atk_")],
          },
