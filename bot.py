@@ -1,5 +1,5 @@
 # dlce BASE bot v7.2
-import os, logging, asyncio, re, json, hashlib, httpx
+import os, logging, asyncio, re, json, hashlib, httpx, html
 from io import BytesIO
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
@@ -482,7 +482,8 @@ async def search_youtube(th, purpose, max_results=15, order="date"):
     results = []
     try:
         pkw = {"WAR":"war base layout anti 3star","RANK":"trophy base layout","FARM":"farming base layout"}
-        q   = f"TH{th} {pkw.get(purpose,'base layout')} 2025 Clash of Clans copy link"
+        cur_year = datetime.now(timezone.utc).year
+        q   = f"TH{th} {pkw.get(purpose,'base layout')} {cur_year} Clash of Clans copy link"
         url = (f"https://www.googleapis.com/youtube/v3/search"
                f"?part=snippet&q={quote_plus(q)}&type=video&maxResults={max_results}"
                f"&order={order}&key={YOUTUBE_API_KEY}")
@@ -559,7 +560,7 @@ async def get_comment_grade(vid_id: str) -> tuple[int, str]:
             likes = item["snippet"]["topLevelComment"]["snippet"]["likeCount"]
             comments.append(f"[{likes} likes] {text[:200]}")
 
-        comments_text = "\\n".join(comments[:20])
+        comments_text = "\n".join(comments[:20])
 
         parts = [
             "These are YouTube comments on a Clash of Clans base layout video.\n\n",
@@ -740,7 +741,14 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     from collections import Counter
-    lines = ["🎲 *dlce BASE bot — Admin Panel*", ""]
+
+    def esc(v):
+        """Escape any dynamic value for safe HTML display (usernames, URLs,
+        report reasons etc. can contain _ * [ ] which broke legacy Markdown
+        parsing and silently crashed this whole handler)."""
+        return html.escape(str(v))
+
+    lines = ["🎲 <b>dlce BASE bot — Admin Panel</b>", ""]
 
     # ── Database stats (if connected) ────────────────────────
     if supabase:
@@ -752,28 +760,28 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             th_counts      = Counter(r["th_level"] for r in rows)
             purpose_counts = Counter(r["purpose"]  for r in rows)
 
-            lines.append("📊 *Usage Stats*")
+            lines.append("📊 <b>Usage Stats</b>")
             lines.append(f"Total searches: {total_searches}")
             lines.append(f"Unique users: {unique_users}")
             lines.append("")
 
-            lines.append("🏰 *Top TH Levels*")
+            lines.append("🏰 <b>Top TH Levels</b>")
             for th_lv, cnt in th_counts.most_common(5):
-                lines.append(f"  TH{th_lv}: {cnt} searches")
+                lines.append(f"  TH{esc(th_lv)}: {cnt} searches")
             lines.append("")
 
-            lines.append("🎯 *Top Purposes*")
+            lines.append("🎯 <b>Top Purposes</b>")
             for pur, cnt in purpose_counts.most_common(3):
-                lines.append(f"  {pur}: {cnt} searches")
+                lines.append(f"  {esc(pur)}: {cnt} searches")
             lines.append("")
 
-            lines.append("🕐 *Recent searches (last 5)*")
+            lines.append("🕐 <b>Recent searches (last 5)</b>")
             for r in rows[:5]:
-                lines.append(f"  @{r.get('username','?')} — TH{r.get('th_level')} {r.get('purpose')} — {str(r.get('searched_at',''))[:16]}")
+                lines.append(f"  @{esc(r.get('username','?'))} — TH{esc(r.get('th_level'))} {esc(r.get('purpose'))} — {esc(str(r.get('searched_at',''))[:16])}")
             lines.append("")
 
         except Exception as e:
-            lines.append(f"⚠️ Usage table error: {e}")
+            lines.append(f"⚠️ Usage table error: {esc(e)}")
             lines.append("")
 
         try:
@@ -781,46 +789,46 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             good_bases = fb_data.data or []
             rated = [b for b in good_bases if b.get("thumbs_up",0) + b.get("thumbs_down",0) > 0]
 
-            lines.append("✅ *Top Rated Bases*")
+            lines.append("✅ <b>Top Rated Bases</b>")
             if rated:
                 for b in rated[:5]:
                     up   = b.get("thumbs_up",0)
                     down = b.get("thumbs_down",0)
                     pct  = int(up/(up+down)*100)
-                    lines.append(f"  TH{b.get('th_level')} {b.get('purpose')} {pct}% ({up}✅{down}❌) score:{b.get('score','?')}")
-                    lines.append(f"  _{b.get('source','?')}_")
+                    lines.append(f"  TH{esc(b.get('th_level'))} {esc(b.get('purpose'))} {pct}% ({up}✅{down}❌) score:{esc(b.get('score','?'))}")
+                    lines.append(f"  <i>{esc(b.get('source','?'))}</i>")
             else:
                 lines.append("  No feedback yet")
             lines.append("")
 
         except Exception as e:
-            lines.append(f"⚠️ Bases table error: {e}")
+            lines.append(f"⚠️ Bases table error: {esc(e)}")
             lines.append("")
 
         try:
             bad_data  = supabase.table("reports").select("*").order("reported_at", desc=True).limit(10).execute()
             bad_bases = bad_data.data or []
 
-            lines.append("⚠️ *Recent Reports*")
+            lines.append("⚠️ <b>Recent Reports</b>")
             if bad_bases:
                 for r in bad_bases[:5]:
-                    lines.append(f"  {r.get('reason','?')} — TH{r.get('th_level')} {r.get('purpose','?')} — {r.get('source','?')}")
+                    lines.append(f"  {esc(r.get('reason','?'))} — TH{esc(r.get('th_level'))} {esc(r.get('purpose','?'))} — {esc(r.get('source','?'))}")
             else:
                 lines.append("  No reports yet")
             lines.append("")
 
         except Exception as e:
-            lines.append(f"⚠️ Reports table error: {e}")
+            lines.append(f"⚠️ Reports table error: {esc(e)}")
 
     else:
-        lines.append("⚠️ *Database not connected*")
+        lines.append("⚠️ <b>Database not connected</b>")
         lines.append("Fix: update SUPABASE_KEY in Railway variables")
         lines.append("Get key from: Supabase → Settings → API → anon/public")
         lines.append("")
 
     # ── Bot status (always shown) ─────────────────────────────
-    lines.append("🤖 *Bot Status*")
-    lines.append(f"  Version: v6.2")
+    lines.append("🤖 <b>Bot Status</b>")
+    lines.append(f"  Version: v7.2")
     lines.append(f"  Database: {'✅ Connected' if supabase else '❌ Not connected'}")
     lines.append(f"  YouTube API: configured")
     lines.append(f"  Admin ID: {ADMIN_ID}")
@@ -829,7 +837,14 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(msg) > 4000:
         msg = msg[:3900] + chr(10) + "...(truncated)"
 
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    try:
+        await update.message.reply_text(msg, parse_mode="HTML")
+    except Exception as e:
+        # Last-resort fallback so the admin ALWAYS gets something back,
+        # even if some unexpected content still breaks formatting.
+        logger.warning(f"Admin panel formatted send failed: {e}")
+        plain = re.sub(r"<[^>]+>", "", msg)
+        await update.message.reply_text(plain)
 
 async def db_feedback(link, positive):
     if not supabase: return
@@ -1378,6 +1393,39 @@ async def group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await start_private(update, context)
 
 
+def th_level_keyboard():
+    row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10,14)]
+    row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14,18)]
+    row3 = [InlineKeyboardButton("TH18",   callback_data="th_18")]
+    return InlineKeyboardMarkup([row1,row2,row3])
+
+
+def guide_topic_keyboard(lang):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(t(lang,"guide_attack"), callback_data="guide_attack"),
+        InlineKeyboardButton(t(lang,"guide_bh"),     callback_data="guide_bh"),
+    ],[
+        InlineKeyboardButton(t(lang,"guide_equip"),  callback_data="guide_equip"),
+        InlineKeyboardButton(t(lang,"guide_web"),    callback_data="guide_web"),
+    ]])
+
+
+async def basefinder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/basefinder — shortcut menu item, jumps straight to TH selection."""
+    if update.effective_chat.type in ["group","supergroup"]:
+        return await group_start(update, context)
+    lang = context.user_data.get("lang","en")
+    await update.message.reply_text(t(lang,"q_th"), reply_markup=th_level_keyboard())
+
+
+async def guides_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/guides — shortcut menu item, jumps straight to guide topic selection."""
+    if update.effective_chat.type in ["group","supergroup"]:
+        return await group_start(update, context)
+    lang = context.user_data.get("lang","en")
+    await update.message.reply_text(t(lang,"q_guide_topic"), reply_markup=guide_topic_keyboard(lang))
+
+
 # ══════════════════════════════════════════════════════════════
 # CONVERSATION HANDLERS
 # ══════════════════════════════════════════════════════════════
@@ -1860,7 +1908,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*בקבוצות:* תוצאות בפרטי.",
     ]
     txt_map = {"en": lines_en, "ru": lines_ru, "he": lines_he}
-    msg = "\\n".join(txt_map.get(lang, lines_en))
+    msg = "\n".join(txt_map.get(lang, lines_en))
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -1868,14 +1916,18 @@ async def post_init(app):
     """Set bot commands menu shown in Telegram UI."""
     from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
     private_cmds = [
-        BotCommand("start",    "🎲 Base Finder + Guides"),
-        BotCommand("language", "🌍 Change language"),
-        BotCommand("help",     "❓ How the bot works"),
-        BotCommand("admin",    "🔐 Admin panel"),
+        BotCommand("start",      "🎲 Base Finder + Guides"),
+        BotCommand("basefinder", "🏰 Find a base (skip menu)"),
+        BotCommand("guides",     "📖 Open guides (skip menu)"),
+        BotCommand("language",   "🌍 Change language"),
+        BotCommand("help",       "❓ How the bot works"),
+        BotCommand("admin",      "🔐 Admin panel"),
     ]
     group_cmds = [
-        BotCommand("start",    "🎲 Base Finder + Guides (results in DM)"),
-        BotCommand("help",     "❓ How the bot works"),
+        BotCommand("start",      "🎲 Base Finder + Guides (results in DM)"),
+        BotCommand("basefinder", "🏰 Find a base (results in DM)"),
+        BotCommand("guides",     "📖 Open guides (results in DM)"),
+        BotCommand("help",       "❓ How the bot works"),
     ]
     await app.bot.set_my_commands(private_cmds, scope=BotCommandScopeAllPrivateChats())
     await app.bot.set_my_commands(group_cmds,   scope=BotCommandScopeAllGroupChats())
@@ -1886,28 +1938,43 @@ async def post_init(app):
 # ══════════════════════════════════════════════════════════════
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start",    group_start),
-                      CommandHandler("language", language_cmd)],
-        states={
-            LANG:            [CallbackQueryHandler(language_chosen,        pattern="^lang_")],
-            CATEGORY:        [CallbackQueryHandler(category_chosen,        pattern="^cat_")],
-            TH_LEVEL:        [CallbackQueryHandler(th_chosen,              pattern="^th_")],
-            PURPOSE:         [CallbackQueryHandler(purpose_chosen,         pattern="^purpose_")],
-            GUIDE_TOPIC:     [CallbackQueryHandler(guide_topic_chosen,     pattern="^guide_")],
-            GUIDE_ATTACK_TH: [CallbackQueryHandler(guide_attack_th_chosen, pattern="^atk_")],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    app.add_handler(conv)
-    app.add_handler(CommandHandler("help",     help_cmd))
-    app.add_handler(CommandHandler("language", language_cmd))
-    app.add_handler(CommandHandler("admin",    admin_panel))
-    app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^fb_"))
-    app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
-    app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
-    app.add_handler(CallbackQueryHandler(back_to_main_handler,pattern="^back_to_main"))
-    logger.info("dlce BASE bot v7.2 starting...")
+
+    # NOTE on architecture: this bot used to run its menu through a
+    # ConversationHandler. That only works if EVERY button the user can
+    # possibly tap is registered inside the ConversationHandler's "current
+    # state". Two flows broke that assumption and caused the reported
+    # freezes (buttons that spin forever with no response):
+    #   1) /language mid-flow: it fired a *duplicate* handler outside the
+    #      conversation, so the "en/ru/he" buttons it showed had no live
+    #      handler once the user was already inside another state.
+    #   2) "Back to Home" after a guide: the guide handlers returned
+    #      ConversationHandler.END, so by the time the "Base Finder / Guides"
+    #      buttons were shown again, the conversation had already ended and
+    #      nothing was listening for cat_bases / cat_guides anymore.
+    # Fix: every button handler is now registered as a plain top-level
+    # handler (not nested inside conversation states), so it always fires
+    # regardless of what screen the user was on before. All handlers are
+    # keyed off distinct callback_data prefixes, so there's no ambiguity.
+    app.add_handler(CommandHandler("start",      group_start))
+    app.add_handler(CommandHandler("language",   language_cmd))
+    app.add_handler(CommandHandler("help",       help_cmd))
+    app.add_handler(CommandHandler("admin",      admin_panel))
+    app.add_handler(CommandHandler("basefinder", basefinder_cmd))
+    app.add_handler(CommandHandler("guides",     guides_cmd))
+    app.add_handler(CommandHandler("cancel",     cancel))
+
+    app.add_handler(CallbackQueryHandler(language_chosen,        pattern="^lang_"))
+    app.add_handler(CallbackQueryHandler(category_chosen,        pattern="^cat_"))
+    app.add_handler(CallbackQueryHandler(th_chosen,              pattern="^th_"))
+    app.add_handler(CallbackQueryHandler(purpose_chosen,         pattern="^purpose_"))
+    app.add_handler(CallbackQueryHandler(guide_topic_chosen,     pattern="^guide_"))
+    app.add_handler(CallbackQueryHandler(guide_attack_th_chosen, pattern="^atk_"))
+    app.add_handler(CallbackQueryHandler(feedback_handler,       pattern="^fb_"))
+    app.add_handler(CallbackQueryHandler(feedback_handler,       pattern="^rp_"))
+    app.add_handler(CallbackQueryHandler(deep_handler,           pattern="^deep_"))
+    app.add_handler(CallbackQueryHandler(back_to_main_handler,   pattern="^back_to_main"))
+
+    logger.info("dlce BASE bot v7.3 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
