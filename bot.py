@@ -1,4 +1,4 @@
-# dlce BASE bot v7.3
+# dlce BASE bot v7.4
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -757,11 +757,10 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not ADMIN_IDS:
             await update.message.reply_text(
                 "⚠️ Admin panel isn't configured yet.\n\n"
-                f"Your Telegram ID is: `{user_id}`\n"
+                f"Your Telegram ID is: {user_id}\n\n"
                 "Add it as the ADMIN_ID (or ADMIN_IDS, comma-separated for "
                 "multiple admins) environment variable in Railway, then "
-                "redeploy.",
-                parse_mode="Markdown"
+                "redeploy."
             )
         else:
             await update.message.reply_text(f"Access denied. Your Telegram ID: {user_id}")
@@ -787,10 +786,19 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def build_and_send_admin_panel(bot, chat_id: int):
     """Builds the admin stats message and sends it to chat_id. Split out from
     admin_panel() so both the private-chat and group->DM paths share one
-    implementation instead of drifting apart."""
+    implementation instead of drifting apart.
+
+    IMPORTANT: sent as PLAIN TEXT (no parse_mode). This message interpolates
+    raw DB content — error strings, base source names, report reasons — none
+    of which is escaped. With parse_mode="Markdown", a single stray
+    underscore/asterisk/backtick anywhere in that data (e.g. "SUPABASE_KEY"
+    in the message below) makes Telegram reject the ENTIRE message with a
+    400 Bad Request, and the admin panel just silently does nothing. Plain
+    text sidesteps that whole class of bug — not just for this string, but
+    for every future one too."""
 
     from collections import Counter
-    lines = ["🎲 *dlce BASE bot — Admin Panel*", ""]
+    lines = ["🎲 dlce BASE bot — Admin Panel", ""]
 
     # ── Database stats (if connected) ────────────────────────
     if supabase:
@@ -802,22 +810,22 @@ async def build_and_send_admin_panel(bot, chat_id: int):
             th_counts      = Counter(r["th_level"] for r in rows)
             purpose_counts = Counter(r["purpose"]  for r in rows)
 
-            lines.append("📊 *Usage Stats*")
+            lines.append("📊 Usage Stats")
             lines.append(f"Total searches: {total_searches}")
             lines.append(f"Unique users: {unique_users}")
             lines.append("")
 
-            lines.append("🏰 *Top TH Levels*")
+            lines.append("🏰 Top TH Levels")
             for th_lv, cnt in th_counts.most_common(5):
                 lines.append(f"  TH{th_lv}: {cnt} searches")
             lines.append("")
 
-            lines.append("🎯 *Top Purposes*")
+            lines.append("🎯 Top Purposes")
             for pur, cnt in purpose_counts.most_common(3):
                 lines.append(f"  {pur}: {cnt} searches")
             lines.append("")
 
-            lines.append("🕐 *Recent searches (last 5)*")
+            lines.append("🕐 Recent searches (last 5)")
             for r in rows[:5]:
                 lines.append(f"  @{r.get('username','?')} — TH{r.get('th_level')} {r.get('purpose')} — {str(r.get('searched_at',''))[:16]}")
             lines.append("")
@@ -831,14 +839,14 @@ async def build_and_send_admin_panel(bot, chat_id: int):
             good_bases = fb_data.data or []
             rated = [b for b in good_bases if b.get("thumbs_up",0) + b.get("thumbs_down",0) > 0]
 
-            lines.append("✅ *Top Rated Bases*")
+            lines.append("✅ Top Rated Bases")
             if rated:
                 for b in rated[:5]:
                     up   = b.get("thumbs_up",0)
                     down = b.get("thumbs_down",0)
                     pct  = int(up/(up+down)*100)
                     lines.append(f"  TH{b.get('th_level')} {b.get('purpose')} {pct}% ({up}✅{down}❌) score:{b.get('score','?')}")
-                    lines.append(f"  _{b.get('source','?')}_")
+                    lines.append(f"  Source: {b.get('source','?')}")
             else:
                 lines.append("  No feedback yet")
             lines.append("")
@@ -851,7 +859,7 @@ async def build_and_send_admin_panel(bot, chat_id: int):
             bad_data  = supabase.table("reports").select("*").order("reported_at", desc=True).limit(10).execute()
             bad_bases = bad_data.data or []
 
-            lines.append("⚠️ *Recent Reports*")
+            lines.append("⚠️ Recent Reports")
             if bad_bases:
                 for r in bad_bases[:5]:
                     lines.append(f"  {r.get('reason','?')} — TH{r.get('th_level')} {r.get('purpose','?')} — {r.get('source','?')}")
@@ -863,14 +871,14 @@ async def build_and_send_admin_panel(bot, chat_id: int):
             lines.append(f"⚠️ Reports table error: {e}")
 
     else:
-        lines.append("⚠️ *Database not connected*")
+        lines.append("⚠️ Database not connected")
         lines.append("Fix: update SUPABASE_KEY in Railway variables")
-        lines.append("Get key from: Supabase → Settings → API → anon/public")
+        lines.append("Get key from: Supabase > Settings > API > anon/public")
         lines.append("")
 
     # ── Bot status (always shown) ─────────────────────────────
-    lines.append("🤖 *Bot Status*")
-    lines.append(f"  Version: v7.3")
+    lines.append("🤖 Bot Status")
+    lines.append(f"  Version: v7.4")
     lines.append(f"  Database: {'✅ Connected' if supabase else '❌ Not connected'}")
     lines.append(f"  YouTube API: configured")
     lines.append(f"  Admin IDs: {', '.join(str(i) for i in ADMIN_IDS) or '(none configured)'}")
@@ -879,7 +887,7 @@ async def build_and_send_admin_panel(bot, chat_id: int):
     if len(msg) > 4000:
         msg = msg[:3900] + chr(10) + "...(truncated)"
 
-    await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+    await bot.send_message(chat_id=chat_id, text=msg)
 
 async def db_feedback(link, positive):
     if not supabase: return
@@ -2069,7 +2077,7 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^fb_"))
     app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
-    logger.info("dlce BASE bot v7.3 starting...")
+    logger.info("dlce BASE bot v7.4 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
