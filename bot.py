@@ -1,4 +1,4 @@
-# dlce BASE bot v7.4
+# dlce BASE bot v7.5
 import os, logging, asyncio, re, json, hashlib, httpx
 from io import BytesIO
 from datetime import datetime, timezone
@@ -141,7 +141,7 @@ T = {
         "guide_attack":   "⚔️ Гайд по атаке",
         "guide_equip":    "🎒 Снаряжение",
         "guide_web":      "🌐 Веб-сервисы",
-        "guide_bh":       "🔨 Билдер Холл",
+        "guide_bh":       "🔨 Деревня строителя",
         "guide_q_th":     "⚔️ Выбери ТХ для гайда по атаке:",
         "watch_video":    "▶️ Смотреть видео",
         "back_main":      "🏠 Главное меню",
@@ -569,7 +569,11 @@ async def get_comment_grade(vid_id: str) -> tuple[int, str]:
             likes = item["snippet"]["topLevelComment"]["snippet"]["likeCount"]
             comments.append(f"[{likes} likes] {text[:200]}")
 
-        comments_text = "\\n".join(comments[:20])
+        # NOTE: was "\\n".join(...) — literal backslash+n, not a real newline
+        # — so Gemini received all 20 comments run together with no visible
+        # line breaks between them, which can blur where one comment ends
+        # and the next begins. chr(10) gives Gemini a real newline per comment.
+        comments_text = chr(10).join(comments[:20])
 
         parts = [
             "These are YouTube comments on a Clash of Clans base layout video.\n\n",
@@ -878,7 +882,7 @@ async def build_and_send_admin_panel(bot, chat_id: int):
 
     # ── Bot status (always shown) ─────────────────────────────
     lines.append("🤖 Bot Status")
-    lines.append(f"  Version: v7.4")
+    lines.append(f"  Version: v7.5")
     lines.append(f"  Database: {'✅ Connected' if supabase else '❌ Not connected'}")
     lines.append(f"  YouTube API: configured")
     lines.append(f"  Admin IDs: {', '.join(str(i) for i in ADMIN_IDS) or '(none configured)'}")
@@ -1205,7 +1209,7 @@ GUIDE_ATTACK = {
 
 GUIDE_BH = {
     "title": {
-        "ru": "🔨 Builder Hall — Фарм золота столицы",
+        "ru": "🔨 Деревня строителя — Фарм золота столицы",
         "en": "🔨 Builder Hall — Capital Gold Farming",
         "he": "🔨 Builder Hall — פארמינג זהב הבירה",
     },
@@ -1284,14 +1288,14 @@ GUIDE_EQUIP = {
             "└ [Таблица](https://t.me/ON_Images/44/55) — Руда на КВ\n"
             "└ [Таблица](https://t.me/ON_Images/44/59) — Руда для прокачки снаряжения\n\n"
             "🛠️ *Разборы снаряжений*\n"
-            "└ [Кукла-лавашар](https://t.me/ON_Images/44/51) — эффективность?\n"
-            "└ [Электросапоги](https://t.me/ON_Images/44/46) — эффективность?\n"
-            "└ [Змеиный браслет](https://t.me/ON_Images/44/47) — эффективность?\n"
-            "└ [Солдатик](https://t.me/ON_Images/44/48) — эффективность?\n"
-            "└ [Тёмная корона](https://t.me/ON_Images/44/50) — эффективность?\n"
-            "└ [Факел героев](https://t.me/ON_Images/44/80) — эффективность?\n"
-            "└ [Метеоритный посох](https://t.me/ON_Images/44/109) — эффективность?\n"
-            "└ [Снежинка](https://t.me/ON_Images/44/141) — эффективность?\n\n"
+            "🌋 [Кукла-лавашар](https://t.me/ON_Images/44/51) — Хранитель, призывает лавовых псов + шаров\n"
+            "🥊 [Перчатка гиганта](https://t.me/ON_Images/44/46) — Король варваров, гигант + урон по площади\n"
+            "🐍 [Змеиный браслет](https://t.me/ON_Images/44/47) — Король варваров, призывает змей-танков\n"
+            "🐗 [Кукла всадника на кабане](https://t.me/ON_Images/44/48) — Королевский чемпион, призывает кабанов\n"
+            "👑 [Тёмная корона](https://t.me/ON_Images/44/50) — Принц миньонов, растущий баф урона/HP\n"
+            "🔥 [Факел героев](https://t.me/ON_Images/44/80) — Хранитель, рывок сквозь стены\n"
+            "🌠 [Метеоритный посох](https://t.me/ON_Images/44/109) — Принц миньонов, пассивный урон на дистанции\n"
+            "❄️ [Снежинка](https://t.me/ON_Images/44/141) — Королевский чемпион, заморозка рядом\n\n"
             "☄️ *Другое*\n"
             "└ [Огненный шар](https://t.me/ON_Images/44/81) — радиус взрыва 2х2/3х3/4х4\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1305,14 +1309,14 @@ GUIDE_EQUIP = {
             "└ [Table](https://t.me/ON_Images/44/55) — Ore from Clan Wars\n"
             "└ [Table](https://t.me/ON_Images/44/59) — Ore needed to upgrade equipment\n\n"
             "🛠️ *Equipment Reviews*\n"
-            "└ [Lava Launcher](https://t.me/ON_Images/44/51) — how effective?\n"
-            "└ [Giant Gauntlet](https://t.me/ON_Images/44/46) — how effective?\n"
-            "└ [Snake Bracelet](https://t.me/ON_Images/44/47) — how effective?\n"
-            "└ [Hog Rider Puppet](https://t.me/ON_Images/44/48) — how effective?\n"
-            "└ [Dark Crown](https://t.me/ON_Images/44/50) — how effective?\n"
-            "└ [Hero Torch](https://t.me/ON_Images/44/80) — how effective?\n"
-            "└ [Meteor Staff](https://t.me/ON_Images/44/109) — how effective?\n"
-            "└ [Snowflake](https://t.me/ON_Images/44/141) — how effective?\n\n"
+            "🌋 [Lava Launcher](https://t.me/ON_Images/44/51) — Grand Warden, summons a Lava Hound + Balloons\n"
+            "🥊 [Giant Gauntlet](https://t.me/ON_Images/44/46) — Barbarian King, grows giant + area damage\n"
+            "🐍 [Snake Bracelet](https://t.me/ON_Images/44/47) — Barbarian King, spawns tanky snakes\n"
+            "🐗 [Hog Rider Puppet](https://t.me/ON_Images/44/48) — Royal Champion, summons Hog Riders\n"
+            "👑 [Dark Crown](https://t.me/ON_Images/44/50) — Minion Prince, stacking damage/HP buff\n"
+            "🔥 [Hero Torch](https://t.me/ON_Images/44/80) — Grand Warden, dash through walls\n"
+            "🌠 [Meteor Staff](https://t.me/ON_Images/44/109) — Minion Prince, passive ranged damage\n"
+            "❄️ [Snowflake](https://t.me/ON_Images/44/141) — Royal Champion, freezes nearby enemies\n\n"
             "☄️ *Other*\n"
             "└ [Fireball](https://t.me/ON_Images/44/81) — blast radius 2x2/3x3/4x4\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1326,14 +1330,14 @@ GUIDE_EQUIP = {
             "└ [טבלה](https://t.me/ON_Images/44/55) — עפרה ממלחמות קבוצה\n"
             "└ [טבלה](https://t.me/ON_Images/44/59) — עפרה לשדרוג ציוד\n\n"
             "🛠️ *סקירות ציוד*\n"
-            "└ [כדור לבה](https://t.me/ON_Images/44/51) — כמה אפקטיבי?\n"
-            "└ [כפפת ענק](https://t.me/ON_Images/44/46) — כמה אפקטיבי?\n"
-            "└ [צמיד נחש](https://t.me/ON_Images/44/47) — כמה אפקטיבי?\n"
-            "└ [בובת חזיר](https://t.me/ON_Images/44/48) — כמה אפקטיבי?\n"
-            "└ [כתר אפל](https://t.me/ON_Images/44/50) — כמה אפקטיבי?\n"
-            "└ [לפיד גיבור](https://t.me/ON_Images/44/80) — כמה אפקטיבי?\n"
-            "└ [מטאור](https://t.me/ON_Images/44/109) — כמה אפקטיבי?\n"
-            "└ [פתית שלג](https://t.me/ON_Images/44/141) — כמה אפקטיבי?\n\n"
+            "🌋 [כדור לבה](https://t.me/ON_Images/44/51) — Grand Warden, מזמן Lava Hound + כדורים\n"
+            "🥊 [כפפת ענק](https://t.me/ON_Images/44/46) — Barbarian King, הופך לענק + נזק שטח\n"
+            "🐍 [צמיד נחש](https://t.me/ON_Images/44/47) — Barbarian King, מזמן נחשים טנקיים\n"
+            "🐗 [בובת חזיר](https://t.me/ON_Images/44/48) — Royal Champion, מזמן רוכבי חזיר\n"
+            "👑 [כתר אפל](https://t.me/ON_Images/44/50) — Minion Prince, באף דמג'/HP שגדל עם הזמן\n"
+            "🔥 [לפיד גיבור](https://t.me/ON_Images/44/80) — Grand Warden, ריצה דרך קירות\n"
+            "🌠 [מטאור](https://t.me/ON_Images/44/109) — Minion Prince, נזק פסיבי לטווח רחוק\n"
+            "❄️ [פתית שלג](https://t.me/ON_Images/44/141) — Royal Champion, מקפיא אויבים בקרבת מקום\n\n"
             "☄️ *אחר*\n"
             "└ [כדור אש](https://t.me/ON_Images/44/81) — רדיוס פיצוץ 2x2/3x3/4x4\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1918,74 +1922,94 @@ async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = context.user_data.get("lang","en")
     lines_en = [
-        "🎲 *dlce BASE bot*",
+        "🎲 dlce BASE bot — Help",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "",
-        "/start — Find a base (TH10–18)",
+        "📋 Commands",
+        "/start — Base Finder + Guides menu",
+        "/basefinder — Jump straight to Base Finder",
+        "/guides — Jump straight to Guides",
         "/language — Change language",
         "/help — This message",
         "",
-        "*How scoring works:*",
-        "🟢 Fresh = posted <3 months",
-        "🟡 Older = 3–9 months",
-        "🔴 Old = 9+ months",
+        "🎯 How Base Finder works",
+        "1️⃣ Pick your Town Hall level",
+        "2️⃣ Pick a purpose — War, Rank or Farm",
+        "3️⃣ Get 3 bases — YouTube + Reddit + Web",
+        "4️⃣ Tap 🏰 Copy Base to open it in-game",
+        "5️⃣ Rate ✅ / ❌ — the bot learns from it",
+        "6️⃣ Tap 🔬 Deep Research for 5 more options",
         "",
-        "*Steps:*",
-        "1️⃣ Pick TH level",
-        "2️⃣ Pick purpose",
-        "3️⃣ Get 3 bases (YouTube + Reddit + Sites)",
-        "4️⃣ Tap 🏰 to open in game",
-        "5️⃣ Rate with ✅/❌ — bot learns!",
-        "6️⃣ Tap 🔬 Deep Research for 5 more",
+        "🚦 Freshness legend",
+        "🟢 Fresh — posted under 3 months ago",
+        "🟡 Older — 3–9 months ago",
+        "🔴 Old — 9+ months ago",
         "",
-        "*In groups:* results go to your DM.",
+        "💬 In groups",
+        "Results go to your DM to keep the group tidy.",
     ]
     lines_ru = [
-        "🎲 *dlce BASE bot*",
+        "🎲 dlce BASE bot — Помощь",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "",
-        "/start — Найти базу (РЗ10–18)",
+        "📋 Команды",
+        "/start — Меню Поиск базы + Гайды",
+        "/basefinder — Сразу к поиску базы",
+        "/guides — Сразу к гайдам",
         "/language — Сменить язык",
         "/help — Это сообщение",
         "",
-        "*Оценка:*",
-        "🟢 Свежая = <3 месяца",
-        "🟡 Постарше = 3–9 мес.",
-        "🔴 Старая = 9+ мес.",
+        "🎯 Как работает поиск базы",
+        "1️⃣ Выбери уровень ратуши",
+        "2️⃣ Выбери цель — Война, Ранг или Фарм",
+        "3️⃣ Получи 3 базы — YouTube + Reddit + Сайты",
+        "4️⃣ Нажми 🏰 Скопировать базу, чтобы открыть в игре",
+        "5️⃣ Оцени ✅ / ❌ — бот учится на этом!",
+        "6️⃣ Нажми 🔬 Глубокий поиск для ещё 5 вариантов",
         "",
-        "*Шаги:*",
-        "1️⃣ Уровень РУ",
-        "2️⃣ Цель базы",
-        "3️⃣ 3 базы (YouTube + Reddit + Сайты)",
-        "4️⃣ 🏰 открыть в игре",
-        "5️⃣ Оцени ✅/❌ — бот учится!",
-        "6️⃣ 🔬 Глубокий поиск — ещё 5 баз",
+        "🚦 Легенда свежести",
+        "🟢 Свежая — младше 3 месяцев",
+        "🟡 Постарше — 3–9 месяцев",
+        "🔴 Старая — 9+ месяцев",
         "",
-        "*В группах:* результаты в личку.",
+        "💬 В группах",
+        "Результаты приходят в личку — чтобы не засорять группу.",
     ]
     lines_he = [
-        "🎲 *dlce BASE bot*",
+        "🎲 dlce BASE bot — עזרה",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "",
-        "/start — מצא בסיס (TH10–18)",
+        "📋 פקודות",
+        "/start — תפריט מוצא בסיסים + מדריכים",
+        "/basefinder — ישר למוצא בסיסים",
+        "/guides — ישר למדריכים",
         "/language — שנה שפה",
         "/help — הודעה זו",
         "",
-        "*דירוג:*",
-        "🟢 חדש = <3 חודשים",
-        "🟡 ישן יותר = 3–9 חוד.",
-        "🔴 ישן = 9+ חוד.",
-        "",
-        "*שלבים:*",
+        "🎯 איך מוצא הבסיסים עובד",
         "1️⃣ בחר רמת TH",
-        "2️⃣ בחר מטרה",
-        "3️⃣ 3 בסיסים (YouTube + Reddit + אתרים)",
-        "4️⃣ 🏰 לפתוח במשחק",
-        "5️⃣ דרג ✅/❌ — הבוט לומד!",
-        "6️⃣ 🔬 מחקר מעמיק",
+        "2️⃣ בחר מטרה — מלחמה, דירוג או פארם",
+        "3️⃣ קבל 3 בסיסים — YouTube + Reddit + אתרים",
+        "4️⃣ לחץ 🏰 העתק בסיס כדי לפתוח במשחק",
+        "5️⃣ דרג ✅ / ❌ — הבוט לומד מזה!",
+        "6️⃣ לחץ 🔬 מחקר מעמיק לעוד 5 אפשרויות",
         "",
-        "*בקבוצות:* תוצאות בפרטי.",
+        "🚦 מקרא טריות",
+        "🟢 חדש — פחות מ-3 חודשים",
+        "🟡 ישן יותר — 3–9 חודשים",
+        "🔴 ישן — מעל 9 חודשים",
+        "",
+        "💬 בקבוצות",
+        "התוצאות נשלחות לפרטי כדי לא לבלגן בקבוצה.",
     ]
     txt_map = {"en": lines_en, "ru": lines_ru, "he": lines_he}
-    msg = "\\n".join(txt_map.get(lang, lines_en))
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    # NOTE: was "\\n".join(...) — a literal backslash+n, not a real newline —
+    # so the whole help message rendered as one jumbled line with visible
+    # "\n" text instead of actual line breaks. That's the "not organized"
+    # bug. chr(10) (a real newline) fixes it.
+    msg = chr(10).join(txt_map.get(lang, lines_en))
+    await update.message.reply_text(msg)
+
 
 
 async def post_init(app):
@@ -2077,7 +2101,7 @@ def main():
     app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^fb_"))
     app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
     app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
-    logger.info("dlce BASE bot v7.4 starting...")
+    logger.info("dlce BASE bot v7.5 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
