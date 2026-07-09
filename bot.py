@@ -89,7 +89,7 @@ T = {
         "guide_attack":   "⚔️ Attack Guide",
         "guide_equip":    "🎒 Equipment",
         "guide_web":      "🌐 Web Services",
-        "guide_bh":       "🔨 Builder Hall",
+        "guide_bh":       "🔨 Clan Hall Raids",
         "guide_q_th":     "⚔️ Choose TH level for attack guide:",
         "watch_video":    "▶️ Watch Video",
         "back_main":      "🏠 Main Menu",
@@ -193,7 +193,7 @@ T = {
         "guide_attack":   "⚔️ מדריך התקפה",
         "guide_equip":    "🎒 ציוד",
         "guide_web":      "🌐 שירותי אינטרנט",
-        "guide_bh":       "🔨 Builder Hall",
+        "guide_bh":       "🔨 ריידים בכפר הבונה",
         "guide_q_th":     "⚔️ בחר רמת TH למדריך:",
         "watch_video":    "▶️ צפה בסרטון",
         "back_main":      "🏠 תפריט ראשי",
@@ -1293,9 +1293,9 @@ GUIDE_ATTACK = {
 
 GUIDE_BH = {
     "title": {
-        "ru": "🔨 Деревня строителя — Фарм золота столицы",
-        "en": "🔨 Builder Hall — Capital Gold Farming",
-        "he": "🔨 Builder Hall — פארמינג זהב הבירה",
+        "ru": "🔨 Рейды Столицы Клана — Фарм золота столицы",
+        "en": "🔨 Clan Hall Raids — Capital Gold Farming",
+        "he": "🔨 ריידים — פארמינג זהב הבירה",
     },
     "text": {
         "ru": (
