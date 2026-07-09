@@ -1,5 +1,5 @@
-# dlce BASE bot v7.4
-import os, logging, asyncio, re, json, hashlib, httpx
+# dlce BASE bot v7.2
+import os, logging, asyncio, re, json, hashlib, httpx, html
 from io import BytesIO
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
@@ -21,16 +21,7 @@ CLAUDE_API_KEY  = os.environ["CLAUDE_API_KEY"]
 YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
 SUPABASE_URL    = os.environ["SUPABASE_URL"]
 SUPABASE_KEY    = os.environ["SUPABASE_KEY"]
-ADMIN_ID        = int(os.environ.get("ADMIN_ID", "0"))  # your Telegram user ID (kept for display/back-compat)
-# ADMIN_ID (or ADMIN_IDS) may be a single ID or a comma-separated list, so more
-# than one clan leader/co-leader can reach the admin panel. If nothing valid is
-# configured this is an empty set, which means the panel denies EVERYONE by
-# default (previous behaviour silently let everyone in when unset — see admin_panel).
-ADMIN_IDS = {
-    int(x) for x in
-    (os.environ.get("ADMIN_IDS") or os.environ.get("ADMIN_ID") or "").replace(" ", "").split(",")
-    if x.strip().lstrip("-").isdigit()
-}
+ADMIN_ID        = int(os.environ.get("ADMIN_ID", "0"))  # your Telegram user ID
 
 genai.configure(api_key=GEMINI_API_KEY)
 gemini = genai.GenerativeModel("gemini-2.0-flash")
@@ -491,8 +482,8 @@ async def search_youtube(th, purpose, max_results=15, order="date"):
     results = []
     try:
         pkw = {"WAR":"war base layout anti 3star","RANK":"trophy base layout","FARM":"farming base layout"}
-        this_year = datetime.now(timezone.utc).year
-        q   = f"TH{th} {pkw.get(purpose,'base layout')} {this_year} Clash of Clans copy link"
+        cur_year = datetime.now(timezone.utc).year
+        q   = f"TH{th} {pkw.get(purpose,'base layout')} {cur_year} Clash of Clans copy link"
         url = (f"https://www.googleapis.com/youtube/v3/search"
                f"?part=snippet&q={quote_plus(q)}&type=video&maxResults={max_results}"
                f"&order={order}&key={YOUTUBE_API_KEY}")
@@ -569,7 +560,7 @@ async def get_comment_grade(vid_id: str) -> tuple[int, str]:
             likes = item["snippet"]["topLevelComment"]["snippet"]["likeCount"]
             comments.append(f"[{likes} likes] {text[:200]}")
 
-        comments_text = "\\n".join(comments[:20])
+        comments_text = "\n".join(comments[:20])
 
         parts = [
             "These are YouTube comments on a Clash of Clans base layout video.\n\n",
@@ -742,63 +733,22 @@ async def db_track_usage(user_id: int, username: str, th: int, purpose: str):
         logger.warning(f"DB track: {e}")
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin-only command — shows usage stats, feedback table, bad bases.
-    SECURITY: never post the actual stats into a group chat, even if the
-    caller is a genuine admin — always DM it instead, same pattern used
-    for base-finder results. Non-admins in a group get no reply at all,
-    so the command's existence isn't advertised to the whole clan."""
-    user_id  = update.effective_user.id
-    is_group = update.effective_chat.type in ("group", "supergroup")
-    logger.info(f"Admin command from user_id={user_id}, ADMIN_IDS={ADMIN_IDS or '(none configured)'}, group={is_group}")
-
-    if user_id not in ADMIN_IDS:
-        if is_group:
-            return  # stay silent in groups — don't advertise /admin to non-admins
-        if not ADMIN_IDS:
-            await update.message.reply_text(
-                "⚠️ Admin panel isn't configured yet.\n\n"
-                f"Your Telegram ID is: {user_id}\n\n"
-                "Add it as the ADMIN_ID (or ADMIN_IDS, comma-separated for "
-                "multiple admins) environment variable in Railway, then "
-                "redeploy."
-            )
-        else:
-            await update.message.reply_text(f"Access denied. Your Telegram ID: {user_id}")
+    """Admin-only command — shows usage stats, feedback table, bad bases."""
+    user_id = update.effective_user.id
+    logger.info(f"Admin command from user_id={user_id}, ADMIN_ID={ADMIN_ID}")
+    if ADMIN_ID and user_id != ADMIN_ID:
+        await update.message.reply_text(f"Access denied. Your ID: {user_id}")
         return
-
-    if is_group:
-        # Genuine admin, but triggered from a group — redirect to DM instead
-        # of posting usage stats/usernames where the whole clan can see them.
-        try:
-            await build_and_send_admin_panel(context.bot, user_id)
-            await update.message.reply_text("📩 Admin panel sent to your DM.")
-        except Exception:
-            await update.message.reply_text(
-                "⚠️ Couldn't DM you the admin panel — please open a private "
-                "chat with the bot first (tap its name → Send Message), then "
-                "run /admin again there."
-            )
-        return
-
-    await build_and_send_admin_panel(context.bot, update.effective_chat.id)
-
-
-async def build_and_send_admin_panel(bot, chat_id: int):
-    """Builds the admin stats message and sends it to chat_id. Split out from
-    admin_panel() so both the private-chat and group->DM paths share one
-    implementation instead of drifting apart.
-
-    IMPORTANT: sent as PLAIN TEXT (no parse_mode). This message interpolates
-    raw DB content — error strings, base source names, report reasons — none
-    of which is escaped. With parse_mode="Markdown", a single stray
-    underscore/asterisk/backtick anywhere in that data (e.g. "SUPABASE_KEY"
-    in the message below) makes Telegram reject the ENTIRE message with a
-    400 Bad Request, and the admin panel just silently does nothing. Plain
-    text sidesteps that whole class of bug — not just for this string, but
-    for every future one too."""
 
     from collections import Counter
-    lines = ["🎲 dlce BASE bot — Admin Panel", ""]
+
+    def esc(v):
+        """Escape any dynamic value for safe HTML display (usernames, URLs,
+        report reasons etc. can contain _ * [ ] which broke legacy Markdown
+        parsing and silently crashed this whole handler)."""
+        return html.escape(str(v))
+
+    lines = ["🎲 <b>dlce BASE bot — Admin Panel</b>", ""]
 
     # ── Database stats (if connected) ────────────────────────
     if supabase:
@@ -810,28 +760,28 @@ async def build_and_send_admin_panel(bot, chat_id: int):
             th_counts      = Counter(r["th_level"] for r in rows)
             purpose_counts = Counter(r["purpose"]  for r in rows)
 
-            lines.append("📊 Usage Stats")
+            lines.append("📊 <b>Usage Stats</b>")
             lines.append(f"Total searches: {total_searches}")
             lines.append(f"Unique users: {unique_users}")
             lines.append("")
 
-            lines.append("🏰 Top TH Levels")
+            lines.append("🏰 <b>Top TH Levels</b>")
             for th_lv, cnt in th_counts.most_common(5):
-                lines.append(f"  TH{th_lv}: {cnt} searches")
+                lines.append(f"  TH{esc(th_lv)}: {cnt} searches")
             lines.append("")
 
-            lines.append("🎯 Top Purposes")
+            lines.append("🎯 <b>Top Purposes</b>")
             for pur, cnt in purpose_counts.most_common(3):
-                lines.append(f"  {pur}: {cnt} searches")
+                lines.append(f"  {esc(pur)}: {cnt} searches")
             lines.append("")
 
-            lines.append("🕐 Recent searches (last 5)")
+            lines.append("🕐 <b>Recent searches (last 5)</b>")
             for r in rows[:5]:
-                lines.append(f"  @{r.get('username','?')} — TH{r.get('th_level')} {r.get('purpose')} — {str(r.get('searched_at',''))[:16]}")
+                lines.append(f"  @{esc(r.get('username','?'))} — TH{esc(r.get('th_level'))} {esc(r.get('purpose'))} — {esc(str(r.get('searched_at',''))[:16])}")
             lines.append("")
 
         except Exception as e:
-            lines.append(f"⚠️ Usage table error: {e}")
+            lines.append(f"⚠️ Usage table error: {esc(e)}")
             lines.append("")
 
         try:
@@ -839,55 +789,62 @@ async def build_and_send_admin_panel(bot, chat_id: int):
             good_bases = fb_data.data or []
             rated = [b for b in good_bases if b.get("thumbs_up",0) + b.get("thumbs_down",0) > 0]
 
-            lines.append("✅ Top Rated Bases")
+            lines.append("✅ <b>Top Rated Bases</b>")
             if rated:
                 for b in rated[:5]:
                     up   = b.get("thumbs_up",0)
                     down = b.get("thumbs_down",0)
                     pct  = int(up/(up+down)*100)
-                    lines.append(f"  TH{b.get('th_level')} {b.get('purpose')} {pct}% ({up}✅{down}❌) score:{b.get('score','?')}")
-                    lines.append(f"  Source: {b.get('source','?')}")
+                    lines.append(f"  TH{esc(b.get('th_level'))} {esc(b.get('purpose'))} {pct}% ({up}✅{down}❌) score:{esc(b.get('score','?'))}")
+                    lines.append(f"  <i>{esc(b.get('source','?'))}</i>")
             else:
                 lines.append("  No feedback yet")
             lines.append("")
 
         except Exception as e:
-            lines.append(f"⚠️ Bases table error: {e}")
+            lines.append(f"⚠️ Bases table error: {esc(e)}")
             lines.append("")
 
         try:
             bad_data  = supabase.table("reports").select("*").order("reported_at", desc=True).limit(10).execute()
             bad_bases = bad_data.data or []
 
-            lines.append("⚠️ Recent Reports")
+            lines.append("⚠️ <b>Recent Reports</b>")
             if bad_bases:
                 for r in bad_bases[:5]:
-                    lines.append(f"  {r.get('reason','?')} — TH{r.get('th_level')} {r.get('purpose','?')} — {r.get('source','?')}")
+                    lines.append(f"  {esc(r.get('reason','?'))} — TH{esc(r.get('th_level'))} {esc(r.get('purpose','?'))} — {esc(r.get('source','?'))}")
             else:
                 lines.append("  No reports yet")
             lines.append("")
 
         except Exception as e:
-            lines.append(f"⚠️ Reports table error: {e}")
+            lines.append(f"⚠️ Reports table error: {esc(e)}")
 
     else:
-        lines.append("⚠️ Database not connected")
+        lines.append("⚠️ <b>Database not connected</b>")
         lines.append("Fix: update SUPABASE_KEY in Railway variables")
-        lines.append("Get key from: Supabase > Settings > API > anon/public")
+        lines.append("Get key from: Supabase → Settings → API → anon/public")
         lines.append("")
 
     # ── Bot status (always shown) ─────────────────────────────
-    lines.append("🤖 Bot Status")
-    lines.append(f"  Version: v7.4")
+    lines.append("🤖 <b>Bot Status</b>")
+    lines.append(f"  Version: v7.2")
     lines.append(f"  Database: {'✅ Connected' if supabase else '❌ Not connected'}")
     lines.append(f"  YouTube API: configured")
-    lines.append(f"  Admin IDs: {', '.join(str(i) for i in ADMIN_IDS) or '(none configured)'}")
+    lines.append(f"  Admin ID: {ADMIN_ID}")
 
     msg = chr(10).join(lines)
     if len(msg) > 4000:
         msg = msg[:3900] + chr(10) + "...(truncated)"
 
-    await bot.send_message(chat_id=chat_id, text=msg)
+    try:
+        await update.message.reply_text(msg, parse_mode="HTML")
+    except Exception as e:
+        # Last-resort fallback so the admin ALWAYS gets something back,
+        # even if some unexpected content still breaks formatting.
+        logger.warning(f"Admin panel formatted send failed: {e}")
+        plain = re.sub(r"<[^>]+>", "", msg)
+        await update.message.reply_text(plain)
 
 async def db_feedback(link, positive):
     if not supabase: return
@@ -1436,6 +1393,39 @@ async def group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await start_private(update, context)
 
 
+def th_level_keyboard():
+    row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10,14)]
+    row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14,18)]
+    row3 = [InlineKeyboardButton("TH18",   callback_data="th_18")]
+    return InlineKeyboardMarkup([row1,row2,row3])
+
+
+def guide_topic_keyboard(lang):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(t(lang,"guide_attack"), callback_data="guide_attack"),
+        InlineKeyboardButton(t(lang,"guide_bh"),     callback_data="guide_bh"),
+    ],[
+        InlineKeyboardButton(t(lang,"guide_equip"),  callback_data="guide_equip"),
+        InlineKeyboardButton(t(lang,"guide_web"),    callback_data="guide_web"),
+    ]])
+
+
+async def basefinder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/basefinder — shortcut menu item, jumps straight to TH selection."""
+    if update.effective_chat.type in ["group","supergroup"]:
+        return await group_start(update, context)
+    lang = context.user_data.get("lang","en")
+    await update.message.reply_text(t(lang,"q_th"), reply_markup=th_level_keyboard())
+
+
+async def guides_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/guides — shortcut menu item, jumps straight to guide topic selection."""
+    if update.effective_chat.type in ["group","supergroup"]:
+        return await group_start(update, context)
+    lang = context.user_data.get("lang","en")
+    await update.message.reply_text(t(lang,"q_guide_topic"), reply_markup=guide_topic_keyboard(lang))
+
+
 # ══════════════════════════════════════════════════════════════
 # CONVERSATION HANDLERS
 # ══════════════════════════════════════════════════════════════
@@ -1496,64 +1486,6 @@ async def category_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return GUIDE_TOPIC
-
-
-# ══════════════════════════════════════════════════════════════
-# QUICK-ACCESS ENTRY POINTS — /basefinder and /guides
-# Let users jump straight past Language + Category screens.
-# Registered as BOTH entry_points and fallbacks on the conv
-# handler so they work whether or not a conversation is already
-# active (see main() for details).
-# ══════════════════════════════════════════════════════════════
-async def _redirect_if_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Shared group->DM redirect used by all quick-access entry points."""
-    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
-        lang = context.user_data.get("lang", "en")
-        bot_username = context.bot.username
-        await update.message.reply_text(
-            t(lang, "group_msg"),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    t(lang, "open_dm"),
-                    url=f"https://t.me/{bot_username}?start=from_group"
-                )
-            ]])
-        )
-        return True
-    return False
-
-
-async def quick_basefinder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/basefinder command — jump straight to TH level selection."""
-    if await _redirect_if_group(update, context):
-        return ConversationHandler.END
-
-    lang = context.user_data.get("lang", "en")
-    context.user_data.pop("th", None)
-    context.user_data.pop("purpose", None)
-    row1 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(10, 14)]
-    row2 = [InlineKeyboardButton(f"TH{i}", callback_data=f"th_{i}") for i in range(14, 18)]
-    row3 = [InlineKeyboardButton("TH18",   callback_data="th_18")]
-    await update.message.reply_text(t(lang, "q_th"), reply_markup=InlineKeyboardMarkup([row1, row2, row3]))
-    return TH_LEVEL
-
-
-async def quick_guides(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/guides command — jump straight to guide topic selection."""
-    if await _redirect_if_group(update, context):
-        return ConversationHandler.END
-
-    lang = context.user_data.get("lang", "en")
-    keyboard = [[
-        InlineKeyboardButton(t(lang, "guide_attack"), callback_data="guide_attack"),
-        InlineKeyboardButton(t(lang, "guide_bh"),     callback_data="guide_bh"),
-    ], [
-        InlineKeyboardButton(t(lang, "guide_equip"),  callback_data="guide_equip"),
-        InlineKeyboardButton(t(lang, "guide_web"),    callback_data="guide_web"),
-    ]]
-    await update.message.reply_text(t(lang, "q_guide_topic"), reply_markup=InlineKeyboardMarkup(keyboard))
-    return GUIDE_TOPIC
-
 
 async def guide_topic_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User chose a guide topic."""
@@ -1874,9 +1806,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def back_to_main_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle back to main menu — sends a fresh message and re-enters the
-    conversation at CATEGORY so the next tap (cat_bases/cat_guides) is
-    actually picked up by category_chosen instead of being dropped."""
+    """Handle back to main menu — sends a fresh message so conversation resets."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("lang","en")
@@ -1893,12 +1823,6 @@ async def back_to_main_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # Reset conversation state by clearing user data partially
     context.user_data.pop("th", None)
     context.user_data.pop("purpose", None)
-    # IMPORTANT: this handler is registered on the ConversationHandler
-    # itself (entry_points + fallbacks). Returning CATEGORY tells PTB's
-    # internal state tracker that this user is now "in" CATEGORY, so the
-    # cat_bases/cat_guides tap that follows is routed to category_chosen
-    # instead of falling through to nothing (the old freeze bug).
-    return CATEGORY
 
 
 async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1984,43 +1908,29 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*בקבוצות:* תוצאות בפרטי.",
     ]
     txt_map = {"en": lines_en, "ru": lines_ru, "he": lines_he}
-    msg = "\\n".join(txt_map.get(lang, lines_en))
+    msg = "\n".join(txt_map.get(lang, lines_en))
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def post_init(app):
     """Set bot commands menu shown in Telegram UI."""
-    from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
-    # NOTE: "admin" is deliberately left OUT of the shared private_cmds list —
-    # otherwise every user who opens a DM with the bot sees "🔐 Admin panel"
-    # in their command menu. It's registered below, per-chat, only for the
-    # Telegram IDs configured in ADMIN_ID / ADMIN_IDS.
+    from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats
     private_cmds = [
         BotCommand("start",      "🎲 Base Finder + Guides"),
-        BotCommand("basefinder", "🏰 Base Finder (skip straight to TH pick)"),
-        BotCommand("guides",     "📖 Guides (skip straight to topics)"),
+        BotCommand("basefinder", "🏰 Find a base (skip menu)"),
+        BotCommand("guides",     "📖 Open guides (skip menu)"),
         BotCommand("language",   "🌍 Change language"),
         BotCommand("help",       "❓ How the bot works"),
+        BotCommand("admin",      "🔐 Admin panel"),
     ]
     group_cmds = [
         BotCommand("start",      "🎲 Base Finder + Guides (results in DM)"),
-        BotCommand("basefinder", "🏰 Base Finder (results in DM)"),
-        BotCommand("guides",     "📖 Guides (results in DM)"),
+        BotCommand("basefinder", "🏰 Find a base (results in DM)"),
+        BotCommand("guides",     "📖 Open guides (results in DM)"),
         BotCommand("help",       "❓ How the bot works"),
     ]
     await app.bot.set_my_commands(private_cmds, scope=BotCommandScopeAllPrivateChats())
     await app.bot.set_my_commands(group_cmds,   scope=BotCommandScopeAllGroupChats())
-
-    admin_cmds = private_cmds + [BotCommand("admin", "🔐 Admin panel")]
-    for admin_id in ADMIN_IDS:
-        try:
-            await app.bot.set_my_commands(admin_cmds, scope=BotCommandScopeChat(chat_id=admin_id))
-        except Exception as e:
-            # Most common cause: this admin has never opened a DM with the
-            # bot yet, so Telegram doesn't have a chat to scope commands to.
-            # /admin still works for them via fallback (unscoped commands
-            # still accept typed text) — this only affects the menu list.
-            logger.warning(f"Could not set admin command menu for {admin_id}: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2029,55 +1939,42 @@ async def post_init(app):
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # ── FIX NOTES (v7.3) ──────────────────────────────────────────
-    # Root cause of BOTH "freeze" bugs was the same pattern: a button/
-    # command that's meant to re-enter the conversation flow (🌍 change
-    # language mid-flow, 🏠 Main Menu, /basefinder, /guides) was wired
-    # up as a *separate* top-level handler outside the ConversationHandler.
-    # PTB tracks conversation state internally per user; a handler that
-    # lives outside `conv` can display a screen but can't update that
-    # internal state. The next tap then gets checked against the *real*
-    # (unchanged/cleared) state, matches nothing, and is silently
-    # dropped — which looks exactly like a freeze (button spinner never
-    # resolves, bot appears dead).
-    #
-    # Fix: every handler that needs to (re)start or jump around the flow
-    # is registered on `conv` itself, in BOTH `entry_points` (fires when
-    # no conversation is currently active — e.g. right after a guide or
-    # base results ended it) AND `fallbacks` (fires when a conversation
-    # IS active in some other state — e.g. user opens /language via the
-    # command menu mid-flow). That way PTB always keeps its internal
-    # state in sync with whatever screen the user is actually looking at.
-    restart_entries = [
-        CommandHandler("start",       group_start),
-        CommandHandler("language",    language_cmd),
-        CommandHandler("basefinder",  quick_basefinder),
-        CommandHandler("guides",      quick_guides),
-        CallbackQueryHandler(back_to_main_handler, pattern="^back_to_main"),
-    ]
-    conv = ConversationHandler(
-        entry_points=restart_entries,
-        states={
-            LANG:            [CallbackQueryHandler(language_chosen,        pattern="^lang_")],
-            CATEGORY:        [CallbackQueryHandler(category_chosen,        pattern="^cat_")],
-            TH_LEVEL:        [CallbackQueryHandler(th_chosen,              pattern="^th_")],
-            PURPOSE:         [CallbackQueryHandler(purpose_chosen,         pattern="^purpose_")],
-            GUIDE_TOPIC:     [CallbackQueryHandler(guide_topic_chosen,     pattern="^guide_")],
-            GUIDE_ATTACK_TH: [CallbackQueryHandler(guide_attack_th_chosen, pattern="^atk_")],
-        },
-        # Same handlers again as fallbacks: fallbacks are only checked
-        # while a conversation is ACTIVE (state != None), entry_points
-        # only when it's NOT (state == None) — we need both to cover
-        # every point where a user might hit one of these buttons/commands.
-        fallbacks=[CommandHandler("cancel", cancel)] + restart_entries,
-    )
-    app.add_handler(conv)
-    app.add_handler(CommandHandler("help",     help_cmd))
-    app.add_handler(CommandHandler("admin",    admin_panel))
-    app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^fb_"))
-    app.add_handler(CallbackQueryHandler(feedback_handler,    pattern="^rp_"))
-    app.add_handler(CallbackQueryHandler(deep_handler,        pattern="^deep_"))
-    logger.info("dlce BASE bot v7.4 starting...")
+    # NOTE on architecture: this bot used to run its menu through a
+    # ConversationHandler. That only works if EVERY button the user can
+    # possibly tap is registered inside the ConversationHandler's "current
+    # state". Two flows broke that assumption and caused the reported
+    # freezes (buttons that spin forever with no response):
+    #   1) /language mid-flow: it fired a *duplicate* handler outside the
+    #      conversation, so the "en/ru/he" buttons it showed had no live
+    #      handler once the user was already inside another state.
+    #   2) "Back to Home" after a guide: the guide handlers returned
+    #      ConversationHandler.END, so by the time the "Base Finder / Guides"
+    #      buttons were shown again, the conversation had already ended and
+    #      nothing was listening for cat_bases / cat_guides anymore.
+    # Fix: every button handler is now registered as a plain top-level
+    # handler (not nested inside conversation states), so it always fires
+    # regardless of what screen the user was on before. All handlers are
+    # keyed off distinct callback_data prefixes, so there's no ambiguity.
+    app.add_handler(CommandHandler("start",      group_start))
+    app.add_handler(CommandHandler("language",   language_cmd))
+    app.add_handler(CommandHandler("help",       help_cmd))
+    app.add_handler(CommandHandler("admin",      admin_panel))
+    app.add_handler(CommandHandler("basefinder", basefinder_cmd))
+    app.add_handler(CommandHandler("guides",     guides_cmd))
+    app.add_handler(CommandHandler("cancel",     cancel))
+
+    app.add_handler(CallbackQueryHandler(language_chosen,        pattern="^lang_"))
+    app.add_handler(CallbackQueryHandler(category_chosen,        pattern="^cat_"))
+    app.add_handler(CallbackQueryHandler(th_chosen,              pattern="^th_"))
+    app.add_handler(CallbackQueryHandler(purpose_chosen,         pattern="^purpose_"))
+    app.add_handler(CallbackQueryHandler(guide_topic_chosen,     pattern="^guide_"))
+    app.add_handler(CallbackQueryHandler(guide_attack_th_chosen, pattern="^atk_"))
+    app.add_handler(CallbackQueryHandler(feedback_handler,       pattern="^fb_"))
+    app.add_handler(CallbackQueryHandler(feedback_handler,       pattern="^rp_"))
+    app.add_handler(CallbackQueryHandler(deep_handler,           pattern="^deep_"))
+    app.add_handler(CallbackQueryHandler(back_to_main_handler,   pattern="^back_to_main"))
+
+    logger.info("dlce BASE bot v7.3 starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
